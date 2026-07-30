@@ -29,5 +29,5 @@
   - $\sigma_{\text{LUT}}$ 정정: B-3 확정값 **$6.3 \times 10^{-7} \cdot q$**로 교체.
   - **파라미터 강건화**: 얕은 가젯($B_g=64, \ell=5$)에서 **깊은 가젯($B_g=32, \ell=6$)**으로 변경 $\implies$ C++ 20/20 시드, JS 40/40 시드 전체 PASS (8192/8192 복원).
 - **2026-07-30: G4 정정 (목업 $\to$ 실연산 연결 완료)**
-  - `fhe_engine.js` 신규: `e2e_pipeline.cpp` 수식을 $2^{15}$ 분할 `mulmod` 정밀 모듈러 산술로 구현한 JS 실연산 포트 엔진. Node.js 30/30 시드 PASS, glue $\sim 30\text{ }\mu\text{s/값}$ (x86 JS).
+  - `fhe_engine.js` 신규: `e2e_pipeline.cpp` 수식을 $2^{15}$ 분할 `mulmod` 정밀 모듈러 산술로 구현한 JS 실연산 포트 엔진. Node.js 30/30 시드 PASS, glue $\sim 20\text{ }\mu\text{s/값}$ (x86 JS, 30시드 중앙값 163 ms/8192).
   - 잔여 과제: 데모 시나리오(건강지수/생체매칭/AI추론) 중 최종 1개 워크로드 데이터셋 확정.

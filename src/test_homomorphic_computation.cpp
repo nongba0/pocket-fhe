@@ -144,6 +144,10 @@ std::vector<int64_t> mshift(const std::vector<int64_t>& v, int j) {
     return res;
 }
 
+// NOTE (labeling convention, 프로젝트 공통): 이 테스트에서 f(m)은 암호문 생성 시
+// 평문으로 계산된다 — batched-PBS(LUT) 출력의 노이즈 모델 시뮬레이션이며, 암호학적으로
+// 실제 실행되는 부분은 repack-free 스위치(glue: embed+merge+gadget KS)뿐이다.
+// EvalMod 역시 평문 ideal-sine + 모델 노이즈. e2e_pipeline.cpp와 동일한 검증 수준.
 // Homomorphic Evaluation Target Function: f(m) = ReLU(2 * m + 5)
 inline int64_t eval_f(int64_t m) {
     int64_t linear = 2 * m + 5;

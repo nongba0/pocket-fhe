@@ -18,11 +18,11 @@ Standard FHE scheme switching (e.g., OpenFHE CKKStoFHEW / FHEWtoCKKS baseline) r
 
 ### Verified Benchmark & Baseline Comparison
 
-| Metric | OpenFHE A2 Baseline *(Cite: `results_a2.log`)* | **Pocket-FHE (Ours)** *(Verified)* |
+| Metric | OpenFHE A2 Baseline *(internal measurement, 2026-07; log available on request)* | **Pocket-FHE (Ours)** *(Verified)* |
 |---|---|---|
 | **Repack Key Footprint** | **1,653.1 MB** (Automorphism keys) | **0.36 GB (~360 MB)** (Single-KSK) 🚀 |
 | **Peak Execution RAM** | ~3.8 GB – 13.8 GB (Scheme Dependent) | **6.2 MB – 20.4 MB** *(Measured Peak RSS)* ⚡ |
-| **Repack Latency** | **37,707 ms** (`fhew2ckks_repack`) | **0 ms** *(Completely Deleted)* |
+| **Repack Latency** | **37,707 ms** (`fhew2ckks_repack`, single-thread CPU) | **0 ms** *(structurally removed)* |
 | **Glue Latency (Native)** | High | **3.0 – 3.7 μs / value** *@ N=8192, Bg=32, ell=6* |
 | **Target Hardware** | Server CPU / GPU | **Smartphone ARM / Wasm** |
 
