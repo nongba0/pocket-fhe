@@ -1,0 +1,33 @@
+# 히스토리 및 상태 로그 (STATUS.md)
+
+이 문서는 모바일/edge FHE 스핀오프 프로젝트의 게이트(Gate G1–G4) 진행 이력 및 정정 기록을 관리하는 문서입니다.
+
+---
+
+## 게이트 진행 정의
+
+1. **G1 — ARM 빌드**: TFHE-rs/C++를 ARM(aarch64)에서 빌드, 기본 PBS 동작 및 이식성 확인.
+2. **G2 — 코어 실측**: batched LUT + glue의 ARM single-thread 시간/메모리 측정.
+   - 단위는 **µs/값** (배치 = k ct × n 계수).
+   - QEMU는 기능 검증용(성능 수치는 실기기 M-class/Snapdragon에서만 측정 인정).
+3. **G3 — 엔드투엔드 파이프라인 시뮬레이션**: CKKS→LUT→CKKS 왕복 파이프라인 노이즈 검증 및 복호화 복원.
+4. **G4 — 데모 시나리오 선정 & 모바일 데모 UI**: 온디바이스 실연산 연결 및 데모 워크로드 확정.
+
+---
+
+## 히스토리 타임라인
+
+- **2026-07-30: 폴더 생성 및 프로젝트 개시**
+- **2026-07-30: G1 통과**
+  - aarch64 cross compiler + QEMU 실행으로 $N=65536, n=2048, k=32$ 파라미터에서 PASS ($\text{max\_err}=157781 < \Delta/2=974848$).
+- **2026-07-30: G2 부분 통과로 정정 (리뷰 반영)**
+  - 단위 정정: "11.14 ms/msg"는 msg가 아니라 ct(32개) 기준. 값 기준 356 ms / 65536값 $\approx 5.4 \text{ }\mu\text{s/값}$ (코스트 모델 glue 추정 $0.005\text{ ms/값}$ 부합).
+  - 측정 범위 정정: 암호화 + expected 생성 + 검증 negmul 제외, pure glue(`embed`+`mshift merge`+`decomp`+`KS`)만 측정.
+  - 앵커 비교 정정: $13.5\text{ ms/msg}$는 전체 파이프라인 앵커이므로 glue 단독과 직접 비교 금지.
+- **2026-07-30: G3 부분 통과로 정정 (리뷰 반영)**
+  - 라벨 정정: `e2e_pipeline.cpp`는 phase-level 노이즈 모델 시뮬레이션(ModRaise/Z_Q는 비밀키 연산, EvalMod는 평문 sin). 실측은 **glue만** ($\sim 3.0\text{ }\mu\text{s/값}$ native)으로 재라벨.
+  - $\sigma_{\text{LUT}}$ 정정: B-3 확정값 **$6.3 \times 10^{-7} \cdot q$**로 교체.
+  - **파라미터 강건화**: 얕은 가젯($B_g=64, \ell=5$)에서 **깊은 가젯($B_g=32, \ell=6$)**으로 변경 $\implies$ C++ 20/20 시드, JS 40/40 시드 전체 PASS (8192/8192 복원).
+- **2026-07-30: G4 정정 (목업 $\to$ 실연산 연결 완료)**
+  - `fhe_engine.js` 신규: `e2e_pipeline.cpp` 수식을 $2^{15}$ 분할 `mulmod` 정밀 모듈러 산술로 구현한 JS 실연산 포트 엔진. Node.js 30/30 시드 PASS, glue $\sim 30\text{ }\mu\text{s/값}$ (x86 JS).
+  - 잔여 과제: 데모 시나리오(건강지수/생체매칭/AI추론) 중 최종 1개 워크로드 데이터셋 확정.
