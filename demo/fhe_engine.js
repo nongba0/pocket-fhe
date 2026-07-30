@@ -137,7 +137,9 @@ const FHE = (() => {
 
     initRoots(n); initRoots(N);
 
-    function run(seed = 42) {
+    // ---- run(seed, payload0) ----
+    // payload0: ct-0에 전달할 512차원 정수 배열 (기본값: 랜덤 m)
+    function run(seed = 42, payload0 = null) {
         const rng = makeRng(seed);
         const gLUT = makeGauss(rng, sigma_lut);
         const gKS  = makeGauss(rng, sigma_ks);
@@ -173,7 +175,11 @@ const FHE = (() => {
         for (let j = 0; j < k; ++j) {
             const m = new Float64Array(n), a = new Float64Array(n), e = new Float64Array(n);
             for (let i = 0; i < n; ++i) {
-                m[i] = Math.floor(rng() * 256) - 128;
+                if (j === 0 && payload0) {
+                    m[i] = payload0[i];
+                } else {
+                    m[i] = Math.floor(rng() * 256) - 128;
+                }
                 a[i] = Math.floor(rng() * q);
                 e[i] = Math.round(gLUT());
             }
@@ -227,10 +233,13 @@ const FHE = (() => {
         // ---- UNTIMED SIMULATION: phase(비밀키 사용) + ideal-sine EvalMod ----
         const A2S = negmul(A2, Sq);
         let exact = 0;
+        const recovered0 = new Float64Array(n);
         for (let i = 0; i < N; ++i) {
             const ph = centered(B2[i] - A2S[i]);
             const y = (q / (2 * Math.PI)) * Math.sin(2 * Math.PI * ph / q) + gEval();
-            if (Math.round(y / A_amp) === Mexp[i]) exact++;
+            const rec = Math.round(y / A_amp);
+            if (rec === Mexp[i]) exact++;
+            if (i % k === 0) recovered0[i / k] = rec;
         }
 
         return {
@@ -239,29 +248,82 @@ const FHE = (() => {
             pass: exact === N,
             glueMs,
             usPerValue: glueMs * 1000 / N,
+            recovered0
         };
     }
 
-    // ---- 512-dim Face ID Biometric Distance Engine (Real Vector Inputs) ----
+    // ---- 512-dim Single Biometric Engine ----
     function runBiometricAuthCustom(liveVector, templateVector, seed = 888) {
-        let sqDist = 0;
+        const dQ = new Float64Array(n);
+        let sqDistPlain = 0;
         for (let i = 0; i < n; ++i) {
-            const diff = liveVector[i] - templateVector[i];
-            sqDist += diff * diff;
+            let d = Math.round(liveVector[i] - templateVector[i]);
+            if (d > 127) d = 127; else if (d < -127) d = -127;
+            dQ[i] = d;
+            sqDistPlain += d * d;
+        }
+
+        const base = run(seed, dQ);
+
+        let sqDist = 0, transportExact = true;
+        for (let i = 0; i < n; ++i) {
+            const dh = base.recovered0[i];
+            sqDist += dh * dh;
+            if (dh !== dQ[i]) transportExact = false;
         }
 
         const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 50.0)));
         const isMatch = sqDist <= 2500;
 
-        const base = run(seed);
         return {
             ...base,
             biometric: {
                 dim: n,
                 sqDist,
+                sqDistPlain,
+                transportExact,
                 simScore: simScore.toFixed(1),
                 isMatch,
                 status: isMatch ? '✅ ACCESS GRANTED (Biometric Match SUCCESS)' : '❌ ACCESS DENIED (Match FAIL)'
+            }
+        };
+    }
+
+    // ---- 512-dim Multi-User 1:N Biometric Search Engine ----
+    function runMultiUserBiometricAuth(liveVector, db, seed = 888) {
+        let bestUser = null;
+        let minSqDist = Infinity;
+        const allResults = [];
+
+        for (let u = 0; u < db.length; ++u) {
+            const user = db[u];
+            let sqDist = 0;
+            for (let i = 0; i < n; ++i) {
+                const diff = Math.round(liveVector[i] - user.vector[i]);
+                sqDist += diff * diff;
+            }
+            allResults.push({ id: user.id, name: user.name, sqDist, simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 50.0))).toFixed(1) });
+            if (sqDist < minSqDist) {
+                minSqDist = sqDist;
+                bestUser = user;
+            }
+        }
+
+        const simScore = Math.max(0, Math.min(100, 100.0 - (minSqDist / 50.0)));
+        const isMatch = minSqDist <= 2500;
+        const base = run(seed);
+
+        return {
+            ...base,
+            multiBiometric: {
+                dim: n,
+                totalUsers: db.length,
+                bestUser: bestUser ? bestUser.name : "Unknown",
+                minSqDist,
+                simScore: simScore.toFixed(1),
+                isMatch,
+                allResults,
+                status: isMatch ? `✅ MATCH FOUND: ${bestUser.name}` : `❌ UNKNOWN USER (No Match in DB)`
             }
         };
     }
@@ -280,7 +342,7 @@ const FHE = (() => {
         return runBiometricAuthCustom(liveFace, templateFace, seed);
     }
 
-    return { run, runBiometricAuth, runBiometricAuthCustom, params: { N, n, k, ell } };
+    return { run, runBiometricAuth, runBiometricAuthCustom, runMultiUserBiometricAuth, params: { N, n, k, ell } };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FHE;

@@ -10,3 +10,13 @@ src/test_ntt
 node_modules/
 .DS_Store
 .vscode/
+
+# Secrets & local certs
+*.pem
+
+# All ELF binaries
+src/biometric_auth
+src/biometric_pipeline_native
+src/test_homomorphic_computation
+src/e2e_pipeline_native
+src/arm_glue_native

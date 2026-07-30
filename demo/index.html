@@ -15,9 +15,9 @@
 
     <div class="app-container">
         <header class="header">
-            <div class="badge">POCKET-FHE LIVE CAMERA ENGINE</div>
-            <h1>Repack-Free CKKS ↔ TFHE<br><span class="gradient-text">On-Device Smartphone Engine</span></h1>
-            <p class="subtitle">모바일 메모리 제약(< 30MB) 상에서 내 진짜 얼굴을 실시간 스캔하여 특징점을 암호화하고 온디바이스 동형암호로 인증합니다.</p>
+            <div class="badge">POCKET-FHE MULTI-USER ENGINE</div>
+            <h1>Repack-Free CKKS ↔ TFHE<br><span class="gradient-text">1:N Encrypted Biometric Search</span></h1>
+            <p class="subtitle">모바일 메모리 제약(< 30MB) 상에서 다중 사용자(N명)의 얼굴 템플릿을 암호화하여 1:N 암호화 생체 검색을 수행합니다.</p>
         </header>
 
         <section class="metrics-grid">
@@ -29,7 +29,7 @@
             <div class="metric-card">
                 <div class="metric-label">Slot Batch Capacity</div>
                 <div class="metric-value blue" id="val-batch">8,192 Slots</div>
-                <div class="metric-sub">k=16 ct × n=512 coeffs</div>
+                <div class="metric-sub">k=16명 패킹 (n=512 coeffs)</div>
             </div>
             <div class="metric-card">
                 <div class="metric-label">Latency per Value</div>
@@ -68,6 +68,28 @@
                 <button id="btn-scan-face" class="btn-emerald-gradient">
                     📸 내 진짜 얼굴 스캔 & FHE 동형 인증
                 </button>
+            </div>
+        </section>
+
+        <!-- Multi-User 1:N Encrypted Database Management Section -->
+        <section class="demo-panel" style="border-color: rgba(168, 85, 247, 0.35); box-shadow: 0 12px 45px rgba(168, 85, 247, 0.12);">
+            <div class="panel-header">
+                <h2>👥 다중 사용자 1:N 암호화 데이터베이스</h2>
+                <span id="user-count-badge" class="status-indicator" style="background: rgba(168, 85, 247, 0.2); color: #c084fc;">등록된 사용자: 3명</span>
+            </div>
+
+            <div style="display: flex; gap: 0.75rem; margin-bottom: 1.25rem; flex-wrap: wrap;">
+                <input type="text" id="input-username" placeholder="신규 사용자 이름 (예: Charlie)" style="flex: 1; min-width: 200px; padding: 0.75rem 1rem; background: rgba(3, 7, 18, 0.7); border: 1px solid var(--card-border); border-radius: 0.85rem; color: #fff; font-size: 0.9rem; outline: none;">
+                <button id="btn-add-user" class="btn-secondary-glow" style="color: #c084fc; border-color: rgba(168, 85, 247, 0.4); background: rgba(168, 85, 247, 0.15);">
+                    ➕ 카메라 얼굴을 DB에 추가
+                </button>
+                <button id="btn-search-1n" class="btn-primary" style="background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); box-shadow: 0 4px 18px rgba(168, 85, 247, 0.4);">
+                    🔍 1:N 다중 사용자 암호화 검색 실행
+                </button>
+            </div>
+
+            <div id="user-db-chips" style="display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 0.5rem;">
+                <!-- Registered users chips rendered here -->
             </div>
         </section>
 

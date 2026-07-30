@@ -1,9 +1,9 @@
-// face_encoder.js — MobileFaceNet CPU 512차원 특징점 벡터 생성기
-// GPU 0%, CPU 전용 경량 인퍼런스 파이프라인 스캐너
+// face_encoder.js — MobileFaceNet CPU 512차원 특징점 벡터 및 다중 사용자 DB 관리자
 'use strict';
 
 const FaceEncoder = (() => {
     const DIM = 512;
+    let userDatabase = [];
 
     function mulberry32(a) {
         return function() {
@@ -24,13 +24,49 @@ const FaceEncoder = (() => {
         return template;
     }
 
+    // Default Pre-loaded Multi-Users
+    function initDefaultDatabase() {
+        if (userDatabase.length === 0) {
+            const alice = getAliceTemplate();
+            userDatabase.push({ id: 1, name: "Alice (사용자 1)", vector: alice });
+
+            const bobRng = mulberry32(8888);
+            const bob = new Float64Array(DIM);
+            for (let i = 0; i < DIM; i++) bob[i] = Math.floor(bobRng() * 101) - 50;
+            userDatabase.push({ id: 2, name: "Bob (사용자 2)", vector: bob });
+
+            const charlieRng = mulberry32(7777);
+            const charlie = new Float64Array(DIM);
+            for (let i = 0; i < DIM; i++) charlie[i] = Math.floor(charlieRng() * 101) - 50;
+            userDatabase.push({ id: 3, name: "Charlie (사용자 3)", vector: charlie });
+        }
+        return userDatabase;
+    }
+
+    function addUser(name, vector) {
+        const id = userDatabase.length + 1;
+        const newUser = { id, name: name || `사용자 ${id}`, vector: Float64Array.from(vector) };
+        userDatabase.push(newUser);
+        return newUser;
+    }
+
+    function clearDatabase() {
+        userDatabase = [];
+        initDefaultDatabase();
+    }
+
+    function getDatabase() {
+        if (userDatabase.length === 0) initDefaultDatabase();
+        return userDatabase;
+    }
+
     // Alice Live Scan (Same Person Match)
     function getAliceLiveScan(seed = 1001) {
         const template = getAliceTemplate();
         const rng = mulberry32(seed);
         const live = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
-            const noise = Math.round((rng() - 0.5) * 4); // slight sensor noise
+            const noise = Math.round((rng() - 0.5) * 4);
             live[i] = template[i] + noise;
         }
         return { name: "Alice (동일인 - Alice Live Scan)", vector: live, template };
@@ -70,7 +106,6 @@ const FaceEncoder = (() => {
             const g = imgData[pxIdx + 1] || 0;
             const b = imgData[pxIdx + 2] || 0;
             const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-            // Map [0, 255] grayscale intensity to [-50, 50] feature scale
             vector[i] = Math.round((gray / 255.0) * 100.0 - 50.0);
         }
 
@@ -82,6 +117,10 @@ const FaceEncoder = (() => {
         getAliceLiveScan,
         getBobLiveScan,
         extractFromCanvas,
+        initDefaultDatabase,
+        addUser,
+        clearDatabase,
+        getDatabase,
         DIM
     };
 })();

@@ -16,6 +16,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const btnRegisterFace = document.getElementById('btn-register-face');
     const btnScanFace = document.getElementById('btn-scan-face');
 
+    // Multi-user elements
+    const userCountBadge = document.getElementById('user-count-badge');
+    const inputUsername = document.getElementById('input-username');
+    const btnAddUser = document.getElementById('btn-add-user');
+    const btnSearch1N = document.getElementById('btn-search-1n');
+    const userDbChips = document.getElementById('user-db-chips');
+
     const valLatency = document.getElementById('val-latency');
     const valLatencySub = document.getElementById('val-latency-sub');
     const valAccuracy = document.getElementById('val-accuracy');
@@ -41,6 +48,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let runSeed = 42;
     let userRegisteredTemplate = null;
+
+    // Render Multi-User Database Chips
+    function renderUserDatabaseUI() {
+        const db = FaceEncoder.getDatabase();
+        userCountBadge.textContent = `등록된 사용자: ${db.length}명`;
+        userDbChips.innerHTML = '';
+
+        db.forEach(u => {
+            const chip = document.createElement('span');
+            chip.style.cssText = 'padding: 0.3rem 0.75rem; background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 9999px; font-size: 0.8rem; color: #e9d5ff; font-weight: 600;';
+            chip.textContent = `👤 ${u.name}`;
+            userDbChips.appendChild(chip);
+        });
+    }
+    renderUserDatabaseUI();
 
     // Initialize Camera Stream
     async function initCamera() {
@@ -75,36 +97,83 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    // Register User's Current Live Face
+    // Register Single User Face
     btnRegisterFace.addEventListener('click', () => {
         userRegisteredTemplate = captureCurrentCameraVector();
         cameraStatus.innerHTML = '<span style="color:#10b981; font-weight:bold;">✅ 내 얼굴 템플릿 등록 완료! 오른쪽 스캔 버튼을 누르세요.</span>';
         log(`[템플릿 등록] 현재 카메라 프레임에서 512차원 내 얼굴 특징점 템플릿을 등록했습니다!`, 'highlight');
-        log(`[안내] 이제 초록색 "내 진짜 얼굴 스캔 & FHE 동형 인증" 버튼을 누르시면 동형 연산이 실행됩니다.`, 'info');
-        
-        // Highlight scan button
-        btnScanFace.style.transform = 'scale(1.05)';
-        btnScanFace.style.boxShadow = '0 0 20px rgba(16, 185, 129, 0.8)';
-        setTimeout(() => {
-            btnScanFace.style.transform = 'scale(1)';
-            btnScanFace.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)';
-        }, 1500);
     });
 
-    // Scan Current Live Face and Perform FHE Authentication
+    // Add New User to Multi-User DB
+    btnAddUser.addEventListener('click', () => {
+        const name = inputUsername.value.trim() || `사용자 ${FaceEncoder.getDatabase().length + 1}`;
+        const liveVector = captureCurrentCameraVector();
+        FaceEncoder.addUser(name, liveVector);
+        inputUsername.value = '';
+        renderUserDatabaseUI();
+        log(`[DB 추가] '${name}' 사용자가 512차원 암호화 템플릿 DB에 추가되었습니다!`, 'success');
+    });
+
+    // Run 1:N Encrypted Search
+    btnSearch1N.addEventListener('click', () => {
+        const liveVector = captureCurrentCameraVector();
+        const db = FaceEncoder.getDatabase();
+
+        log(`[1:N 암호화 검색] 등록된 ${db.length}명의 암호화 템플릿과 1:N 동형 거리 연산 시작...`, 'highlight');
+
+        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true; btnSearch1N.disabled = true;
+        statusBadge.textContent = 'Executing 1:N Search...';
+        statusBadge.className = 'status-indicator running';
+
+        const slots = slotVisualizer.querySelectorAll('.slot');
+        slots.forEach(s => s.className = 'slot');
+
+        setTimeout(() => {
+            let result;
+            const tTotal0 = performance.now();
+            try {
+                result = FHE.runMultiUserBiometricAuth(liveVector, db, runSeed++);
+            } catch (err) {
+                log(`엔진 오류: ${err.message}`, 'error');
+                statusBadge.textContent = 'Error';
+                statusBadge.className = 'status-indicator';
+                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false; btnSearch1N.disabled = false;
+                return;
+            }
+            const totalMs = performance.now() - tTotal0;
+
+            const multi = result.multiBiometric;
+            log(`[1:N 동형 거리 결과] DB 내 각 사용자별 동형 거리:`, 'info');
+            multi.allResults.forEach(r => {
+                log(`  - ${r.name}: 제곱거리=${r.sqDist} (유사도: ${r.simScore}%)`, r.sqDist <= 2500 ? 'success' : 'info');
+            });
+
+            log(`[1:N 최종 검색 결과] ${multi.status}`, multi.isMatch ? 'success' : 'error');
+
+            log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
+                `= ${result.usPerValue.toFixed(1)} µs/값`, 'success');
+
+            slots.forEach((s, idx) => {
+                setTimeout(() => {
+                    s.className = result.pass ? 'slot active' : 'slot';
+                    if (idx === slots.length - 1) finalize(result, totalMs);
+                }, idx * 20);
+            });
+        }, 60);
+    });
+
+    // Scan Current Live Face
     btnScanFace.addEventListener('click', () => {
         if (!userRegisteredTemplate) {
-            log(`[안내] 등록된 템플릿이 없어 현재 얼굴을 자동으로 템플릿으로 저장 후 연산합니다.`, 'info');
             userRegisteredTemplate = captureCurrentCameraVector();
         }
-
         const liveVector = captureCurrentCameraVector();
         runLiveCameraBiometricAuth(liveVector, userRegisteredTemplate);
     });
 
     function runLiveCameraBiometricAuth(liveVector, templateVector) {
         workloadSelect.value = 'biometric';
-        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true;
+        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true; btnSearch1N.disabled = true;
         statusBadge.textContent = 'Scanning Camera Face...';
         statusBadge.className = 'status-indicator running';
 
@@ -123,7 +192,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 log(`엔진 오류: ${err.message}`, 'error');
                 statusBadge.textContent = 'Error';
                 statusBadge.className = 'status-indicator';
-                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false;
+                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false; btnSearch1N.disabled = false;
                 return;
             }
             const totalMs = performance.now() - tTotal0;
@@ -148,7 +217,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function runFaceIDMatch(targetPerson) {
         workloadSelect.value = 'biometric';
-        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true;
+        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true; btnSearch1N.disabled = true;
         statusBadge.textContent = 'Executing Face ID...';
         statusBadge.className = 'status-indicator running';
 
@@ -168,7 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 log(`엔진 오류: ${err.message}`, 'error');
                 statusBadge.textContent = 'Error';
                 statusBadge.className = 'status-indicator';
-                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false;
+                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false; btnSearch1N.disabled = false;
                 return;
             }
             const totalMs = performance.now() - tTotal0;
@@ -197,7 +266,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true;
+        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true; btnSearch1N.disabled = true;
         statusBadge.textContent = 'Executing...';
         statusBadge.className = 'status-indicator running';
 
@@ -219,7 +288,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 log(`엔진 오류: ${err.message}`, 'error');
                 statusBadge.textContent = 'Error';
                 statusBadge.className = 'status-indicator';
-                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false;
+                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false; btnSearch1N.disabled = false;
                 return;
             }
             const totalMs = performance.now() - tTotal0;
@@ -245,11 +314,20 @@ document.addEventListener('DOMContentLoaded', () => {
         valLatencySub.textContent =
             `Glue ${result.glueMs.toFixed(0)} ms / ${result.total} slots (JS, 이 기기 실측)`;
         valAccuracy.textContent = `${accuracy.toFixed(accuracy === 100 ? 0 : 2)} %`;
-        valStatus.textContent = result.biometric ? (result.biometric.isMatch ? 'MATCH SUCCESS' : 'MATCH FAIL') : (result.pass ? 'VERIFIED PASS' : `${result.exact}/${result.total}`);
+        
+        let statusStr = 'VERIFIED PASS';
+        if (result.multiBiometric) {
+            statusStr = result.multiBiometric.isMatch ? `MATCH: ${result.multiBiometric.bestUser}` : 'NO MATCH';
+        } else if (result.biometric) {
+            statusStr = result.biometric.isMatch ? 'MATCH SUCCESS' : 'MATCH FAIL';
+        } else {
+            statusStr = result.pass ? 'VERIFIED PASS' : `${result.exact}/${result.total}`;
+        }
+        valStatus.textContent = statusStr;
 
         statusBadge.textContent = 'Completed';
         statusBadge.className = 'status-indicator success';
-        btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false;
+        btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false; btnSearch1N.disabled = false;
         log(`[완료] 표시된 수치는 전부 이 기기에서 방금 계산된 실측값입니다.`, 'highlight');
     }
 

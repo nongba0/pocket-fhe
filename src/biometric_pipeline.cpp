@@ -264,15 +264,21 @@ void test_biometric_match(const std::string& test_name,
     }
 
     int exact_count = 0;
+    int64_t recovered_sq_dist = 0;
     for (int i = 0; i < N; ++i) {
         int64_t m_hat = std::round(y[i] / A_amp);
         if (m_hat == M_expected[i]) exact_count++;
+        if (i % k == 0) recovered_sq_dist += m_hat * m_hat; // ct-0 슬롯 = |diff| 벡터
     }
 
-    bool is_match = (ground_truth_sq_dist <= 2000);
+    // 정직성 규약: 판정은 복호 복구된 값(recovered_sq_dist)으로 내린다.
+    // ground_truth_sq_dist는 평문 대조용으로만 출력.
+    bool is_match = (recovered_sq_dist <= 2000);
     std::cout << "\n----------------------------------------------------------" << std::endl;
     std::cout << "[Test Scenario: " << test_name << "]" << std::endl;
-    std::cout << "  - 512-dim Feature Squared Distance = " << ground_truth_sq_dist << std::endl;
+    std::cout << "  - Squared Distance (recovered from decryption) = " << recovered_sq_dist
+              << " | plaintext ground truth = " << ground_truth_sq_dist
+              << (recovered_sq_dist == ground_truth_sq_dist ? " (MATCH)" : " (DIVERGED)") << std::endl;
     std::cout << "  - Calculated Similarity Match Score = " << sim_score << "%" << std::endl;
     std::cout << "  - Authentication Decision = "
               << (is_match ? "\033[32m[✅ ACCESS GRANTED (Biometric Match SUCCESS)]\033[0m"
@@ -322,7 +328,8 @@ int main() {
 
     std::cout << "==========================================================" << std::endl;
     std::cout << "  Pocket-FHE Real-World Biometric Auth Pipeline (CPU-Only)" << std::endl;
-    std::cout << "  MobileFaceNet 512-dim Embedding Quantization & Matching" << std::endl;
+    std::cout << "  512-dim embedding (synthetic; MobileFaceNet-class placeholder)" << std::endl;
+    std::cout << "  NOTE: switch(glue)=real computation, LUT/EvalMod=noise model" << std::endl;
     std::cout << "==========================================================" << std::endl;
 
     // Run Test 1: Match Test
