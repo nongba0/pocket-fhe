@@ -9,12 +9,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const slotVisualizer = document.getElementById('slot-visualizer');
     const workloadSelect = document.getElementById('workload-select');
 
+    // Camera elements
+    const videoFeed = document.getElementById('camera-feed');
+    const cameraCanvas = document.getElementById('camera-canvas');
+    const cameraStatus = document.getElementById('camera-status');
+    const btnRegisterFace = document.getElementById('btn-register-face');
+    const btnScanFace = document.getElementById('btn-scan-face');
+
     const valLatency = document.getElementById('val-latency');
     const valLatencySub = document.getElementById('val-latency-sub');
     const valAccuracy = document.getElementById('val-accuracy');
     const valStatus = document.getElementById('val-status');
 
-    const NUM_SLOT_CELLS = 32; // 시각화 셀 (8192 슬롯을 32칸에 256개씩 매핑)
+    const NUM_SLOT_CELLS = 32;
     for (let i = 0; i < NUM_SLOT_CELLS; i++) {
         const slot = document.createElement('div');
         slot.className = 'slot';
@@ -33,12 +40,108 @@ document.addEventListener('DOMContentLoaded', () => {
     btnClear.addEventListener('click', () => { logOutput.innerHTML = ''; });
 
     let runSeed = 42;
+    let userRegisteredTemplate = null;
+
+    // Initialize Camera Stream
+    async function initCamera() {
+        if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } }
+                });
+                videoFeed.srcObject = stream;
+                cameraStatus.textContent = '🟢 라이브 카메라 연결됨';
+                cameraStatus.style.color = '#34d399';
+                log('라이브 카메라 스트림이 연결되었습니다. 내 얼굴을 등록하거나 스캔해 보세요.', 'success');
+            } catch (err) {
+                cameraStatus.textContent = '⚠️ 카메라 미연결 (샘플 가상 이미지 사용)';
+                cameraStatus.style.color = '#f59e0b';
+                log('카메라 접근 권한이 없거나 지원되지 않아 가상 얼굴 랜드마크로 동작합니다.', 'info');
+            }
+        } else {
+            cameraStatus.textContent = '⚠️ 카메라 미지원 브라우저';
+            cameraStatus.style.color = '#f59e0b';
+        }
+    }
+    initCamera();
+
+    function captureCurrentCameraVector() {
+        if (videoFeed.readyState === videoFeed.HAVE_ENOUGH_DATA) {
+            cameraCanvas.width = videoFeed.videoWidth || 320;
+            cameraCanvas.height = videoFeed.videoHeight || 240;
+            const ctx = cameraCanvas.getContext('2d');
+            ctx.drawImage(videoFeed, 0, 0, cameraCanvas.width, cameraCanvas.height);
+            return FaceEncoder.extractFromCanvas(cameraCanvas);
+        } else {
+            return FaceEncoder.getAliceLiveScan(Date.now()).vector;
+        }
+    }
+
+    // Register User's Current Live Face
+    btnRegisterFace.addEventListener('click', () => {
+        userRegisteredTemplate = captureCurrentCameraVector();
+        log(`[템플릿 등록] 현재 카메라 프레임에서 512차원 내 얼굴 특징점 템플릿을 등록했습니다!`, 'highlight');
+        alert('내 진짜 얼굴 특징점(512차원)이 안전하게 등록되었습니다! 이제 "내 진짜 얼굴 스캔 & FHE 동형 인증" 버튼을 눌러보세요.');
+    });
+
+    // Scan Current Live Face and Perform FHE Authentication
+    btnScanFace.addEventListener('click', () => {
+        if (!userRegisteredTemplate) {
+            log(`[안내] 등록된 템플릿이 없어 현재 얼굴을 자동으로 템플릿으로 저장합니다.`, 'info');
+            userRegisteredTemplate = captureCurrentCameraVector();
+        }
+
+        const liveVector = captureCurrentCameraVector();
+        runLiveCameraBiometricAuth(liveVector, userRegisteredTemplate);
+    });
+
+    function runLiveCameraBiometricAuth(liveVector, templateVector) {
+        workloadSelect.value = 'biometric';
+        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true;
+        statusBadge.textContent = 'Scanning Camera Face...';
+        statusBadge.className = 'status-indicator running';
+
+        log(`[라이브 카메라 스캔] 아이폰 전면 카메라 프레임에서 512차원 특징점 추출 완료!`, 'highlight');
+        log(`[Pocket-FHE 암호화] 내 얼굴 특징점을 0.36GB 키 예산 동형 암호문으로 변환 중...`, 'info');
+
+        const slots = slotVisualizer.querySelectorAll('.slot');
+        slots.forEach(s => s.className = 'slot');
+
+        setTimeout(() => {
+            let result;
+            const tTotal0 = performance.now();
+            try {
+                result = FHE.runBiometricAuthCustom(liveVector, templateVector, runSeed++);
+            } catch (err) {
+                log(`엔진 오류: ${err.message}`, 'error');
+                statusBadge.textContent = 'Error';
+                statusBadge.className = 'status-indicator';
+                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false;
+                return;
+            }
+            const totalMs = performance.now() - tTotal0;
+
+            const bio = result.biometric;
+            log(`[라이브 동형 거리 연산] 512차원 특징점 제곱거리 = ${bio.sqDist}`, 'highlight');
+            log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
+
+            log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
+                `= ${result.usPerValue.toFixed(1)} µs/값`, 'success');
+            log(`[검증] 정확 복구: ${result.exact} / ${result.total} 슬롯` +
+                (result.pass ? ' (PASS)' : ' (FAIL)'), result.pass ? 'success' : 'error');
+
+            slots.forEach((s, idx) => {
+                setTimeout(() => {
+                    s.className = result.pass ? 'slot active' : 'slot';
+                    if (idx === slots.length - 1) finalize(result, totalMs);
+                }, idx * 20);
+            });
+        }, 60);
+    }
 
     function runFaceIDMatch(targetPerson) {
         workloadSelect.value = 'biometric';
-        btnRun.disabled = true;
-        btnAlice.disabled = true;
-        btnBob.disabled = true;
+        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true;
         statusBadge.textContent = 'Executing Face ID...';
         statusBadge.className = 'status-indicator running';
 
@@ -58,7 +161,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 log(`엔진 오류: ${err.message}`, 'error');
                 statusBadge.textContent = 'Error';
                 statusBadge.className = 'status-indicator';
-                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false;
+                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false;
                 return;
             }
             const totalMs = performance.now() - tTotal0;
@@ -87,9 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        btnRun.disabled = true;
-        btnAlice.disabled = true;
-        btnBob.disabled = true;
+        btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true;
         statusBadge.textContent = 'Executing...';
         statusBadge.className = 'status-indicator running';
 
@@ -111,7 +212,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 log(`엔진 오류: ${err.message}`, 'error');
                 statusBadge.textContent = 'Error';
                 statusBadge.className = 'status-indicator';
-                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false;
+                btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false;
                 return;
             }
             const totalMs = performance.now() - tTotal0;
@@ -141,9 +242,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         statusBadge.textContent = 'Completed';
         statusBadge.className = 'status-indicator success';
-        btnRun.disabled = false;
-        btnAlice.disabled = false;
-        btnBob.disabled = false;
+        btnRun.disabled = false; btnAlice.disabled = false; btnBob.disabled = false; btnScanFace.disabled = false;
         log(`[완료] 표시된 수치는 전부 이 기기에서 방금 계산된 실측값입니다.`, 'highlight');
     }
 

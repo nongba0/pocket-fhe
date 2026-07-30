@@ -13,9 +13,9 @@
     <div class="background-glow"></div>
     <div class="app-container">
         <header class="header">
-            <div class="badge">POCKET-FHE ON-DEVICE ENGINE</div>
-            <h1>Repack-Free CKKS ↔ TFHE<br><span class="gradient-text">Smartphone Engine</span></h1>
-            <p class="subtitle">모바일 메모리 제약(< 30MB) 상에서 Batched 암호문 스키마 스위칭 및 생체 인증을 온디바이스로 직접 구동합니다.</p>
+            <div class="badge">POCKET-FHE LIVE CAMERA ENGINE</div>
+            <h1>Repack-Free CKKS ↔ TFHE<br><span class="gradient-text">Live Face ID Engine</span></h1>
+            <p class="subtitle">아이폰/스마트폰 카메라로 내 진짜 얼굴을 실시간 스캔하여 특징점을 추출하고 온디바이스 동형암호로 인증합니다.</p>
         </header>
 
         <section class="metrics-grid">
@@ -41,6 +41,29 @@
             </div>
         </section>
 
+        <!-- Live Camera Face ID Scanner Section -->
+        <section class="camera-panel" style="background: rgba(22, 27, 38, 0.85); backdrop-filter: blur(12px); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 1.25rem; padding: 1.5rem; margin-bottom: 2rem; text-align: center;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+                <h2 style="font-size: 1.2rem; font-weight: 600;">📷 라이브 카메라 얼굴 스캔 & FHE 인증</h2>
+                <span id="camera-status" style="font-size: 0.8rem; color: #9ca3af;">카메라 준비 중...</span>
+            </div>
+
+            <div style="position: relative; width: 100%; max-width: 320px; height: 240px; margin: 0 auto 1.25rem; border-radius: 1rem; overflow: hidden; border: 2px solid rgba(99, 102, 241, 0.4); background: #000;">
+                <video id="camera-feed" autoplay playsinline style="width: 100%; height: 100%; object-fit: cover;"></video>
+                <canvas id="camera-canvas" style="display: none;"></canvas>
+                <div id="face-scanner-overlay" style="position: absolute; top: 10%; left: 15%; width: 70%; height: 80%; border: 2px dashed rgba(16, 185, 129, 0.6); border-radius: 50%; pointer-events: none; box-shadow: 0 0 15px rgba(16, 185, 129, 0.2);"></div>
+            </div>
+
+            <div style="display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap;">
+                <button id="btn-register-face" style="padding: 0.75rem 1.25rem; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 0.75rem; color: #60a5fa; font-weight: 600; cursor: pointer; font-size: 0.9rem;">
+                    👤 현재 얼굴을 등록 템플릿으로 저장
+                </button>
+                <button id="btn-scan-face" style="padding: 0.75rem 1.5rem; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; border-radius: 0.75rem; color: #fff; font-weight: 700; cursor: pointer; font-size: 0.95rem; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35);">
+                    📸 내 진짜 얼굴 스캔 & FHE 동형 인증
+                </button>
+            </div>
+        </section>
+
         <section class="demo-panel">
             <div class="panel-header">
                 <h2>온디바이스 사설 추론 / 헬스 스코어 / 생체 인증 데모</h2>
@@ -63,10 +86,10 @@
 
             <div class="face-quick-actions" id="face-quick-actions" style="margin-bottom: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
                 <button id="btn-alice" class="btn-secondary" style="padding: 0.5rem 1rem; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 0.5rem; color: #34d399; cursor: pointer; font-size: 0.85rem; font-weight: 600;">
-                    👤 Alice 얼굴 검증 (동일인 Match 테스트)
+                    👤 Alice 샘플 얼굴 검증 (Match)
                 </button>
                 <button id="btn-bob" class="btn-secondary" style="padding: 0.5rem 1rem; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 0.5rem; color: #f87171; cursor: pointer; font-size: 0.85rem; font-weight: 600;">
-                    👤 Bob 얼굴 검증 (타인 Mismatch 테스트)
+                    👤 Bob 샘플 얼굴 검증 (Mismatch)
                 </button>
             </div>
 
@@ -77,7 +100,7 @@
                 </div>
                 <div class="console-logs" id="log-output">
                     <div class="log-line info">[System] Engine initialized. Ready to execute on-device pipeline.</div>
-                    <div class="log-line info">[System] MobileFaceNet 512-dim feature embedding generator connected.</div>
+                    <div class="log-line info">[System] Live HTML5 Camera Scanner connected.</div>
                 </div>
             </div>
 
