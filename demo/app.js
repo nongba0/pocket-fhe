@@ -50,17 +50,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     video: { facingMode: 'user', width: { ideal: 320 }, height: { ideal: 240 } }
                 });
                 videoFeed.srcObject = stream;
-                cameraStatus.textContent = '🟢 라이브 카메라 연결됨';
-                cameraStatus.style.color = '#34d399';
+                videoFeed.play().catch(() => {});
+                cameraStatus.innerHTML = '<span style="color:#34d399;">🟢 라이브 카메라 연결됨</span>';
                 log('라이브 카메라 스트림이 연결되었습니다. 내 얼굴을 등록하거나 스캔해 보세요.', 'success');
             } catch (err) {
-                cameraStatus.textContent = '⚠️ 카메라 미연결 (샘플 가상 이미지 사용)';
-                cameraStatus.style.color = '#f59e0b';
+                cameraStatus.innerHTML = '<span style="color:#f59e0b;">⚠️ 카메라 미연결 (샘플 가상 이미지 사용)</span>';
                 log('카메라 접근 권한이 없거나 지원되지 않아 가상 얼굴 랜드마크로 동작합니다.', 'info');
             }
         } else {
-            cameraStatus.textContent = '⚠️ 카메라 미지원 브라우저';
-            cameraStatus.style.color = '#f59e0b';
+            cameraStatus.innerHTML = '<span style="color:#f59e0b;">⚠️ 카메라 미지원 브라우저</span>';
         }
     }
     initCamera();
@@ -80,14 +78,23 @@ document.addEventListener('DOMContentLoaded', () => {
     // Register User's Current Live Face
     btnRegisterFace.addEventListener('click', () => {
         userRegisteredTemplate = captureCurrentCameraVector();
+        cameraStatus.innerHTML = '<span style="color:#10b981; font-weight:bold;">✅ 내 얼굴 템플릿 등록 완료! 오른쪽 스캔 버튼을 누르세요.</span>';
         log(`[템플릿 등록] 현재 카메라 프레임에서 512차원 내 얼굴 특징점 템플릿을 등록했습니다!`, 'highlight');
-        alert('내 진짜 얼굴 특징점(512차원)이 안전하게 등록되었습니다! 이제 "내 진짜 얼굴 스캔 & FHE 동형 인증" 버튼을 눌러보세요.');
+        log(`[안내] 이제 초록색 "내 진짜 얼굴 스캔 & FHE 동형 인증" 버튼을 누르시면 동형 연산이 실행됩니다.`, 'info');
+        
+        // Highlight scan button
+        btnScanFace.style.transform = 'scale(1.05)';
+        btnScanFace.style.boxShadow = '0 0 20px rgba(16, 185, 129, 0.8)';
+        setTimeout(() => {
+            btnScanFace.style.transform = 'scale(1)';
+            btnScanFace.style.boxShadow = '0 4px 14px rgba(16, 185, 129, 0.35)';
+        }, 1500);
     });
 
     // Scan Current Live Face and Perform FHE Authentication
     btnScanFace.addEventListener('click', () => {
         if (!userRegisteredTemplate) {
-            log(`[안내] 등록된 템플릿이 없어 현재 얼굴을 자동으로 템플릿으로 저장합니다.`, 'info');
+            log(`[안내] 등록된 템플릿이 없어 현재 얼굴을 자동으로 템플릿으로 저장 후 연산합니다.`, 'info');
             userRegisteredTemplate = captureCurrentCameraVector();
         }
 
