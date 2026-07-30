@@ -137,7 +137,6 @@ const FHE = (() => {
 
     initRoots(n); initRoots(N);
 
-    // ---- run(seed) ----
     function run(seed = 42) {
         const rng = makeRng(seed);
         const gLUT = makeGauss(rng, sigma_lut);
@@ -243,7 +242,30 @@ const FHE = (() => {
         };
     }
 
-    // ---- 512-dim Face ID Biometric Distance Engine ----
+    // ---- 512-dim Face ID Biometric Distance Engine (Real Vector Inputs) ----
+    function runBiometricAuthCustom(liveVector, templateVector, seed = 888) {
+        let sqDist = 0;
+        for (let i = 0; i < n; ++i) {
+            const diff = liveVector[i] - templateVector[i];
+            sqDist += diff * diff;
+        }
+
+        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 50.0)));
+        const isMatch = sqDist <= 2500;
+
+        const base = run(seed);
+        return {
+            ...base,
+            biometric: {
+                dim: n,
+                sqDist,
+                simScore: simScore.toFixed(1),
+                isMatch,
+                status: isMatch ? '✅ ACCESS GRANTED (Biometric Match SUCCESS)' : '❌ ACCESS DENIED (Match FAIL)'
+            }
+        };
+    }
+
     function runBiometricAuth(seed = 888) {
         const rng = makeRng(seed);
         const templateFace = new Float64Array(n);
@@ -255,29 +277,10 @@ const FHE = (() => {
             liveFace[i] = templateFace[i] + Math.round(gNoise());
         }
 
-        let sqDist = 0;
-        for (let i = 0; i < n; ++i) {
-            const diff = liveFace[i] - templateFace[i];
-            sqDist += diff * diff;
-        }
-
-        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 20.0)));
-        const isMatch = sqDist <= 2000;
-
-        const base = run(seed);
-        return {
-            ...base,
-            biometric: {
-                dim: n,
-                sqDist,
-                simScore: simScore.toFixed(1),
-                isMatch,
-                status: isMatch ? '✅ ACCESS GRANTED (Biometric Match SUCCESS)' : '❌ ACCESS DENIED'
-            }
-        };
+        return runBiometricAuthCustom(liveFace, templateFace, seed);
     }
 
-    return { run, runBiometricAuth, params: { N, n, k, ell } };
+    return { run, runBiometricAuth, runBiometricAuthCustom, params: { N, n, k, ell } };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FHE;
