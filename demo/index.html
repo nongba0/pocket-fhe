@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Repack-Free FHE On-Device Smartphone Demo</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="background-glow"></div>
+    <div class="app-container">
+        <header class="header">
+            <div class="badge">ON-DEVICE FHE DEMO</div>
+            <h1>Repack-Free CKKS ↔ TFHE<br><span class="gradient-text">Smartphone Engine</span></h1>
+            <p class="subtitle">모바일 메모리 제약(< 30MB) 상에서 Batched 암호문 스키마 스위칭을 온디바이스로 직접 구동합니다.</p>
+        </header>
+
+        <section class="metrics-grid">
+            <div class="metric-card">
+                <div class="metric-label">Key Memory Budget (실규모 설계치)</div>
+                <div class="metric-value green" id="val-memory">0.36 GB</div>
+                <div class="metric-sub">vs. CKKS-FBT 13.8 GB — 본 데모는 축소 파라미터</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Slot Batch Capacity</div>
+                <div class="metric-value blue" id="val-batch">8,192 Slots</div>
+                <div class="metric-sub">k=16 ct × n=512 coeffs</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Latency per Value</div>
+                <div class="metric-value purple" id="val-latency">-- μs</div>
+                <div class="metric-sub" id="val-latency-sub">온디바이스 측정 대기 중</div>
+            </div>
+            <div class="metric-card">
+                <div class="metric-label">Recovery Accuracy</div>
+                <div class="metric-value gold" id="val-accuracy">-- %</div>
+                <div class="metric-sub" id="val-status">READY</div>
+            </div>
+        </section>
+
+        <section class="demo-panel">
+            <div class="panel-header">
+                <h2>온디바이스 사설 추론 / 헬스 스코어 데모</h2>
+                <span class="status-indicator" id="status-badge">Standby</span>
+            </div>
+
+            <div class="controls">
+                <div class="control-group">
+                    <label for="workload-select">데모 워크로드 시나리오:</label>
+                    <select id="workload-select">
+                        <option value="health">사설 암호화 건강 지수 (Private Health Score)</option>
+                        <option value="biometric">사설 생체 특징점 매칭 (Private Biometric Match)</option>
+                        <option value="ai">온디바이스 사설 AI 추론 (Private Mobile Inference)</option>
+                    </select>
+                </div>
+                <button id="btn-run" class="btn-primary">
+                    <span class="btn-icon">⚡</span> 온디바이스 FHE 연산 실행
+                </button>
+            </div>
+
+            <div class="console-box">
+                <div class="console-header">
+                    <span>LIVE LOG CONSOLE</span>
+                    <span class="console-clear" id="btn-clear">Clear</span>
+                </div>
+                <div class="console-logs" id="log-output">
+                    <div class="log-line info">[System] 실연산 JS 엔진 로드됨 (fhe_engine.js — e2e_pipeline.cpp 포트, 목업 아님).</div>
+                    <div class="log-line info">[System] 스마트폰 브라우저에서 열면 해당 기기 ARM에서 직접 연산·측정됩니다. Glue만 실측, LUT/EvalMod는 노이즈 시뮬레이션.</div>
+                </div>
+            </div>
+
+            <div class="chart-section">
+                <h3>슬롯별 암호문 복호화 무결성 (Slot Recovery Chart)</h3>
+                <div class="slot-visualizer" id="slot-visualizer">
+                    <!-- Dynamic slots rendered here -->
+                </div>
+            </div>
+        </section>
+
+        <footer class="footer">
+            <p>Antigravity FHE Mobile Project • Repack-Free CKKS-TFHE Pipeline (2026)</p>
+        </footer>
+    </div>
+
+    <script src="fhe_engine.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>

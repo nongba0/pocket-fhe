@@ -1,0 +1,12 @@
+# Build binaries and temporary logs
+src/*_native
+src/*_aarch64
+src/test_ntt
+*.o
+*.exe
+*.log
+
+# Node & OS artifacts
+node_modules/
+.DS_Store
+.vscode/
