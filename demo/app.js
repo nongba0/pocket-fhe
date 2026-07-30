@@ -119,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const liveVector = captureCurrentCameraVector();
         const db = FaceEncoder.getDatabase();
 
-        log(`[1:N 암호화 검색] 등록된 ${db.length}명의 암호화 템플릿과 1:N 동형 거리 연산 시작...`, 'highlight');
+        log(`[1:N 검색] ${db.length}명의 차분 벡터를 k=16 배치 암호문에 실어 한 번의 파이프라인으로 동시 처리 (배치 = 갤러리)`, 'highlight');
 
         btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true; btnSearch1N.disabled = true;
         statusBadge.textContent = 'Executing 1:N Search...';
@@ -143,10 +143,11 @@ document.addEventListener('DOMContentLoaded', () => {
             const totalMs = performance.now() - tTotal0;
 
             const multi = result.multiBiometric;
-            log(`[1:N 동형 거리 결과] DB 내 각 사용자별 동형 거리:`, 'info');
+            log(`[1:N 복호 결과] 복구된 슬롯에서 사용자별 제곱거리 계산 (평문 대조: ${multi.allTransportExact ? '전원 정확 수송 ✓' : '불일치 ✗'}):`, 'info');
             multi.allResults.forEach(r => {
-                log(`  - ${r.name}: 제곱거리=${r.sqDist} (유사도: ${r.simScore}%)`, r.sqDist <= 2500 ? 'success' : 'info');
+                log(`  - ${r.name}: 제곱거리=${r.sqDist} (유사도: ${r.simScore}%)`, r.sqDist <= 40000 ? 'success' : 'info');
             });
+            if (multi.truncated) log(`[안내] 데모는 1배치(k=16명)까지 동시 처리 — 초과 사용자는 제외됨`, 'info');
 
             log(`[1:N 최종 검색 결과] ${multi.status}`, multi.isMatch ? 'success' : 'error');
 
@@ -177,8 +178,8 @@ document.addEventListener('DOMContentLoaded', () => {
         statusBadge.textContent = 'Scanning Camera Face...';
         statusBadge.className = 'status-indicator running';
 
-        log(`[라이브 카메라 스캔] 아이폰 전면 카메라 프레임에서 512차원 특징점 추출 완료!`, 'highlight');
-        log(`[Pocket-FHE 암호화] 내 얼굴 특징점을 0.36GB 키 예산 동형 암호문으로 변환 중...`, 'info');
+        log(`[라이브 카메라 스캔] 카메라 프레임에서 512차원 특징점 추출 완료 (간이 인코더)`, 'highlight');
+        log(`[Pocket-FHE] 특징점 차분 벡터를 RLWE 암호문 실페이로드로 인코딩 — 스위치(glue)는 실연산, LUT 단계는 노이즈 모델`, 'info');
 
         const slots = slotVisualizer.querySelectorAll('.slot');
         slots.forEach(s => s.className = 'slot');
@@ -198,7 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const totalMs = performance.now() - tTotal0;
 
             const bio = result.biometric;
-            log(`[라이브 동형 거리 연산] 512차원 특징점 제곱거리 = ${bio.sqDist}`, 'highlight');
+            log(`[복호 판정] 복구된 512개 차분값에서 제곱거리 = ${bio.sqDist} (평문 대조: ${bio.transportExact ? '512/512 정확 수송 ✓' : '불일치 ✗'})`, 'highlight');
             log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
 
             log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
@@ -222,8 +223,8 @@ document.addEventListener('DOMContentLoaded', () => {
         statusBadge.className = 'status-indicator running';
 
         const personData = targetPerson === 'alice' ? FaceEncoder.getAliceLiveScan(runSeed) : FaceEncoder.getBobLiveScan(runSeed);
-        log(`[Face ID 스캔] ${personData.name} 512차원 특징점 벡터 추출 완료`, 'highlight');
-        log(`[Pocket-FHE 암호화] 512차원 특징점을 FHE 암호문으로 변환 중...`, 'info');
+        log(`[Face ID 스캔] ${personData.name} 512차원 특징점 벡터 추출 완료 (합성 샘플)`, 'highlight');
+        log(`[Pocket-FHE] 특징점 차분 벡터를 RLWE 암호문 실페이로드로 인코딩 — 스위치(glue)는 실연산, LUT 단계는 노이즈 모델`, 'info');
 
         const slots = slotVisualizer.querySelectorAll('.slot');
         slots.forEach(s => s.className = 'slot');

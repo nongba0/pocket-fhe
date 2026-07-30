@@ -137,8 +137,13 @@ const FHE = (() => {
 
     initRoots(n); initRoots(N);
 
-    // ---- run(seed, payload0) ----
-    function run(seed = 42, payload0 = null) {
+    // ---- run(seed, payloadsIn) ----
+    // payloadsIn: Float64Array 1개(ct 0에 적재) 또는 배열(최대 k개 — ct 0..m-1에 적재).
+    // 각 원소 ∈ [-127,127]. 나머지 ct는 난수. 결과: recovered = 적재 ct들의 복구
+    // 슬롯 배열, recovered0 = recovered[0] (하위 호환).
+    function run(seed = 42, payloadsIn = null) {
+        const payloads = payloadsIn == null ? null
+            : Array.isArray(payloadsIn) ? payloadsIn.slice(0, k) : [payloadsIn];
         const rng = makeRng(seed);
         const gLUT = makeGauss(rng, sigma_lut);
         const gKS  = makeGauss(rng, sigma_ks);
@@ -174,8 +179,8 @@ const FHE = (() => {
         for (let j = 0; j < k; ++j) {
             const m = new Float64Array(n), a = new Float64Array(n), e = new Float64Array(n);
             for (let i = 0; i < n; ++i) {
-                if (j === 0 && payload0) {
-                    m[i] = payload0[i];
+                if (payloads && j < payloads.length) {
+                    m[i] = payloads[j][i];
                 } else {
                     m[i] = Math.floor(rng() * 256) - 128;
                 }
@@ -232,13 +237,16 @@ const FHE = (() => {
         // ---- UNTIMED SIMULATION: phase(비밀키 사용) + ideal-sine EvalMod ----
         const A2S = negmul(A2, Sq);
         let exact = 0;
-        const recovered0 = new Float64Array(n);
-        for (let i = 0; i < N; ++i) {
-            const ph = centered(B2[i] - A2S[i]);
+        const numRec = payloads ? payloads.length : 1;
+        const recovered = [];
+        for (let j = 0; j < numRec; ++j) recovered.push(new Float64Array(n));
+        for (let p = 0; p < N; ++p) {
+            const ph = centered(B2[p] - A2S[p]);
             const y = (q / (2 * Math.PI)) * Math.sin(2 * Math.PI * ph / q) + gEval();
             const rec = Math.round(y / A_amp);
-            if (rec === Mexp[i]) exact++;
-            if (i % k === 0) recovered0[i / k] = rec;
+            if (rec === Mexp[p]) exact++;
+            const jj = p % k; // ct jj의 슬롯 위치 = i·k + jj
+            if (jj < numRec) recovered[jj][(p - jj) / k] = rec;
         }
 
         return {
@@ -247,7 +255,8 @@ const FHE = (() => {
             pass: exact === N,
             glueMs,
             usPerValue: glueMs * 1000 / N,
-            recovered0
+            recovered,
+            recovered0: recovered[0]
         };
     }
 
@@ -289,36 +298,64 @@ const FHE = (() => {
     }
 
     // ---- 512-dim Multi-User 1:N Biometric Search Engine ----
+    // 정직성 규약 + B* 스토리: 배치 차원 k(=16)가 곧 갤러리 차원이다.
+    // ct j에 "live vs template_j" 차분 벡터를 실어 한 번의 파이프라인 통과로
+    // 최대 k명의 거리를 동시 계산하고, 사용자별 sqDist와 최종 판정은 전부
+    // 복호 복구된 슬롯 값(recovered[j])에서 계산한다. (LUT 단계는 노이즈 모델)
     function runMultiUserBiometricAuth(liveVector, db, seed = 888) {
-        let bestUser = null;
-        let minSqDist = Infinity;
-        const allResults = [];
+        const users = db.slice(0, k); // k=16명 초과분은 다음 배치(현 데모는 1배치)
+        const truncated = db.length > k;
 
-        for (let u = 0; u < db.length; ++u) {
-            const user = db[u];
-            let sqDist = 0;
+        // 1) 사용자별 차분 벡터 양자화 → k개 페이로드
+        const payloads = [];
+        const plainDists = [];
+        for (let u = 0; u < users.length; ++u) {
+            const dQ = new Float64Array(n);
+            let sq = 0;
             for (let i = 0; i < n; ++i) {
-                const diff = Math.round(liveVector[i] - user.vector[i]);
-                sqDist += diff * diff;
+                let d = Math.round(liveVector[i] - users[u].vector[i]);
+                if (d > 127) d = 127; else if (d < -127) d = -127;
+                dQ[i] = d;
+                sq += d * d;
             }
-            allResults.push({ id: user.id, name: user.name, sqDist, simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 550.0))).toFixed(1) });
-            if (sqDist < minSqDist) {
-                minSqDist = sqDist;
-                bestUser = user;
+            payloads.push(dQ);
+            plainDists.push(sq);
+        }
+
+        // 2) 전원 동시에 파이프라인 통과 (배치 = 갤러리)
+        const base = run(seed, payloads);
+
+        // 3) 사용자별 거리·판정은 복구 슬롯에서 계산
+        let bestUser = null, minSqDist = Infinity, allTransportExact = true;
+        const allResults = [];
+        for (let u = 0; u < users.length; ++u) {
+            let sqDist = 0, transportExact = true;
+            for (let i = 0; i < n; ++i) {
+                const dh = base.recovered[u][i];
+                sqDist += dh * dh;
+                if (dh !== payloads[u][i]) transportExact = false;
             }
+            if (!transportExact) allTransportExact = false;
+            allResults.push({
+                id: users[u].id, name: users[u].name,
+                sqDist, sqDistPlain: plainDists[u], transportExact,
+                simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 550.0))).toFixed(1)
+            });
+            if (sqDist < minSqDist) { minSqDist = sqDist; bestUser = users[u]; }
         }
 
         const simScore = Math.max(0, Math.min(100, 100.0 - (minSqDist / 550.0)));
         const isMatch = minSqDist <= 40000;
-        const base = run(seed);
 
         return {
             ...base,
             multiBiometric: {
                 dim: n,
-                totalUsers: db.length,
+                totalUsers: users.length,
+                truncated,
                 bestUser: bestUser ? bestUser.name : "Unknown",
                 minSqDist,
+                allTransportExact,
                 simScore: simScore.toFixed(1),
                 isMatch,
                 allResults,

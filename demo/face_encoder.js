@@ -1,4 +1,7 @@
-// face_encoder.js — MobileFaceNet CPU 512차원 L2-정규화 공간 그라디언트 특징점 인코더
+// face_encoder.js — 간이 512차원 특징 인코더 (L2-정규화 공간 그라디언트 풀링)
+// 주의: 실제 얼굴 인식 모델이 아닌 데모용 placeholder — 이미지 전역 기술자라
+// 동일 인물 식별이 아니라 "유사 장면/조명" 매칭에 가깝다.
+// 실서비스에서는 MobileFaceNet 등 실제 임베딩 모델로 교체해야 한다.
 'use strict';
 
 const FaceEncoder = (() => {
