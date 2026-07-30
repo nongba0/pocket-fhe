@@ -271,8 +271,8 @@ const FHE = (() => {
             if (dh !== dQ[i]) transportExact = false;
         }
 
-        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 120.0)));
-        const isMatch = sqDist <= 6000;
+        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 550.0)));
+        const isMatch = sqDist <= 40000;
 
         return {
             ...base,
@@ -301,15 +301,15 @@ const FHE = (() => {
                 const diff = Math.round(liveVector[i] - user.vector[i]);
                 sqDist += diff * diff;
             }
-            allResults.push({ id: user.id, name: user.name, sqDist, simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 120.0))).toFixed(1) });
+            allResults.push({ id: user.id, name: user.name, sqDist, simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 550.0))).toFixed(1) });
             if (sqDist < minSqDist) {
                 minSqDist = sqDist;
                 bestUser = user;
             }
         }
 
-        const simScore = Math.max(0, Math.min(100, 100.0 - (minSqDist / 120.0)));
-        const isMatch = minSqDist <= 6000;
+        const simScore = Math.max(0, Math.min(100, 100.0 - (minSqDist / 550.0)));
+        const isMatch = minSqDist <= 40000;
         const base = run(seed);
 
         return {
