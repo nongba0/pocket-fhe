@@ -42,30 +42,28 @@ int main() {
         }
     }
 
-    // 512-dim Alice Live Scan vs Registered Template
+    // --- TEST 1: Alice Same-Person Match (Access Granted Expected) ---
     std::vector<int64_t> template_face(n);
-    std::vector<int64_t> live_face(n);
+    std::vector<int64_t> alice_live_face(n);
     std::normal_distribution<double> dist_noise(0.0, 1.2);
 
-    int64_t sq_dist_plain = 0;
+    int64_t sq_dist_alice_plain = 0;
     for (int i = 0; i < n; ++i) {
         template_face[i] = (i * 7) % 81 - 40;
-        live_face[i] = template_face[i] + std::round(dist_noise(gen));
-        int64_t diff = live_face[i] - template_face[i];
-        sq_dist_plain += diff * diff;
+        alice_live_face[i] = template_face[i] + std::round(dist_noise(gen));
+        int64_t diff = alice_live_face[i] - template_face[i];
+        sq_dist_alice_plain += diff * diff;
     }
 
-    std::cout << "[Biometric Match Test] Plaintext 512-dim Squared Distance: " << sq_dist_plain << std::endl;
-
-    // Encrypt Difference Vector
+    // Encrypt Alice Difference Vector
     std::vector<std::vector<int64_t>> ctsA(k, std::vector<int64_t>(n));
     std::vector<std::vector<int64_t>> ctsB(k, std::vector<int64_t>(n));
-    std::vector<int64_t> Mexp(N, 0);
+    std::vector<int64_t> Mexp_alice(N, 0);
 
     for (int j = 0; j < k; ++j) {
         std::vector<int64_t> m(n);
         for (int i = 0; i < n; ++i) {
-            m[i] = (j == 0) ? (live_face[i] - template_face[i]) : ((i + j) % 256 - 128);
+            m[i] = (j == 0) ? (alice_live_face[i] - template_face[i]) : ((i + j) % 256 - 128);
             ctsA[j][i] = dist_q(gen);
         }
         std::vector<int64_t> as = negmul(ctsA[j], stfhe, roots_n);
@@ -76,10 +74,10 @@ int main() {
         std::vector<int64_t> Mj(N, 0);
         for (int i = 0; i < n; ++i) Mj[i * k] = m[i];
         std::vector<int64_t> r = mshift(Mj, j);
-        for (int i = 0; i < N; ++i) Mexp[i] += r[i];
+        for (int i = 0; i < N; ++i) Mexp_alice[i] += r[i];
     }
 
-    // Timed Glue
+    // Timed Glue for Alice
     std::vector<int64_t> Act(N, 0), Bct(N, 0);
     for (int j = 0; j < k; ++j) {
         std::vector<int64_t> ma = mshift(embed(ctsA[j]), j);
@@ -113,27 +111,106 @@ int main() {
         }
     }
 
-    // Recover slots and compute encrypted squared distance
     std::vector<int64_t> A2S = negmul(A2, Sq, roots_N);
-    int exact = 0;
-    int64_t sq_dist_encrypted = 0;
+    int exact_alice = 0;
+    int64_t sq_dist_alice_encrypted = 0;
 
     for (int i = 0; i < N; ++i) {
         int64_t ph = centered(B2[i] - A2S[i]);
         double y = (q / (2.0 * PI)) * std::sin(2.0 * PI * ph / (double)q);
         int64_t rec = std::round(y / (double)A_amp);
-        if (rec == Mexp[i]) exact++;
-        if (i % k == 0) sq_dist_encrypted += rec * rec;
+        if (rec == Mexp_alice[i]) exact_alice++;
+        if (i % k == 0) sq_dist_alice_encrypted += rec * rec;
     }
 
-    std::cout << "[Biometric Match Result] Encrypted 512-dim Squared Distance: " << sq_dist_encrypted << std::endl;
-    bool isMatch = sq_dist_encrypted <= 40000;
-    std::cout << "Match Verdict: " << (isMatch ? "✅ ACCESS GRANTED" : "❌ ACCESS DENIED") << std::endl;
+    bool aliceMatch = sq_dist_alice_encrypted <= 40000;
+    std::cout << "[Test 1: Alice Same-Person Match] Encrypted Dist: " << sq_dist_alice_encrypted 
+              << " | Verdict: " << (aliceMatch ? "✅ ACCESS GRANTED" : "❌ DENIED") << std::endl;
 
-    if (exact == N && isMatch) {
-        std::cout << "✅ Biometric Pipeline Execution PASS (100% Recovery & Accurate Match)" << std::endl;
+    // --- TEST 2: Bob Different-Person Mismatch (Access Denied Expected) ---
+    std::vector<int64_t> bob_live_face(n);
+    int64_t sq_dist_bob_plain = 0;
+    for (int i = 0; i < n; ++i) {
+        bob_live_face[i] = (i * 19 + 11) % 81 - 40; // Completely different face
+        int64_t diff = bob_live_face[i] - template_face[i];
+        sq_dist_bob_plain += diff * diff;
+    }
+
+    std::vector<std::vector<int64_t>> ctsA_bob(k, std::vector<int64_t>(n));
+    std::vector<std::vector<int64_t>> ctsB_bob(k, std::vector<int64_t>(n));
+    std::vector<int64_t> Mexp_bob(N, 0);
+
+    for (int j = 0; j < k; ++j) {
+        std::vector<int64_t> m(n);
+        for (int i = 0; i < n; ++i) {
+            m[i] = (j == 0) ? (bob_live_face[i] - template_face[i]) : ((i + j) % 256 - 128);
+            ctsA_bob[j][i] = dist_q(gen);
+        }
+        std::vector<int64_t> as = negmul(ctsA_bob[j], stfhe, roots_n);
+        for (int i = 0; i < n; ++i) {
+            ctsB_bob[j][i] = mod(as[i] + (__int128(A_amp) * mod(m[i])) % q);
+        }
+
+        std::vector<int64_t> Mj(N, 0);
+        for (int i = 0; i < n; ++i) Mj[i * k] = m[i];
+        std::vector<int64_t> r = mshift(Mj, j);
+        for (int i = 0; i < N; ++i) Mexp_bob[i] += r[i];
+    }
+
+    std::vector<int64_t> Act_bob(N, 0), Bct_bob(N, 0);
+    for (int j = 0; j < k; ++j) {
+        std::vector<int64_t> ma = mshift(embed(ctsA_bob[j]), j);
+        std::vector<int64_t> mb = mshift(embed(ctsB_bob[j]), j);
+        for (int i = 0; i < N; ++i) {
+            Act_bob[i] = (Act_bob[i] + ma[i]) % q;
+            Bct_bob[i] = (Bct_bob[i] + mb[i]) % q;
+        }
+    }
+
+    std::vector<std::vector<int64_t>> digs_bob(ell, std::vector<int64_t>(N));
+    std::vector<int64_t> Ac_bob(N);
+    for (int i = 0; i < N; ++i) Ac_bob[i] = centered(Act_bob[i]);
+    for (int t = 0; t < ell; ++t) {
+        for (int i = 0; i < N; ++i) {
+            int64_t d = Ac_bob[i] % Bg;
+            if (d < 0) d += Bg;
+            if (d > Bg / 2) d -= Bg;
+            digs_bob[t][i] = mod(d);
+            Ac_bob[i] = (Ac_bob[i] - d) / Bg;
+        }
+    }
+
+    std::vector<int64_t> A2_bob(N, 0), B2_bob = Bct_bob;
+    for (int t = 0; t < ell; ++t) {
+        std::vector<int64_t> da = negmul(digs_bob[t], KSK[t].a, roots_N);
+        std::vector<int64_t> db = negmul(digs_bob[t], KSK[t].b, roots_N);
+        for (int i = 0; i < N; ++i) {
+            A2_bob[i] = (A2_bob[i] + da[i]) % q;
+            B2_bob[i] = (B2_bob[i] - db[i] + q) % q;
+        }
+    }
+
+    std::vector<int64_t> A2S_bob = negmul(A2_bob, Sq, roots_N);
+    int exact_bob = 0;
+    int64_t sq_dist_bob_encrypted = 0;
+
+    for (int i = 0; i < N; ++i) {
+        int64_t ph = centered(B2_bob[i] - A2S_bob[i]);
+        double y = (q / (2.0 * PI)) * std::sin(2.0 * PI * ph / (double)q);
+        int64_t rec = std::round(y / (double)A_amp);
+        if (rec == Mexp_bob[i]) exact_bob++;
+        if (i % k == 0) sq_dist_bob_encrypted += rec * rec;
+    }
+
+    bool bobMatch = sq_dist_bob_encrypted <= 40000;
+    std::cout << "[Test 2: Bob Mismatch Denial] Encrypted Dist: " << sq_dist_bob_encrypted 
+              << " | Verdict: " << (bobMatch ? "❌ GRANTED (ERROR)" : "✅ ACCESS DENIED (CORRECT)") << std::endl;
+
+    // Dual-Path Assertion
+    if (exact_alice == N && exact_bob == N && aliceMatch && !bobMatch) {
+        std::cout << "✅ Biometric Pipeline Dual-Path PASS (Alice Match GRANTED & Bob Mismatch DENIED Verified)" << std::endl;
     } else {
-        std::cerr << "❌ Biometric Pipeline Verification FAIL" << std::endl;
+        std::cerr << "❌ Biometric Pipeline Dual-Path Verification FAIL!" << std::endl;
         return 1;
     }
 

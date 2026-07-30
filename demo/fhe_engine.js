@@ -36,13 +36,18 @@ const FHE = (() => {
     const invmod = (x) => powmod(x, q - 2);
     function centered(x) { const r = mod(x); return r > q / 2 ? r - q : r; }
 
-    // ---- Cryptographically Secure PRNG (Web Crypto API crypto.getRandomValues with mulberry32 fallback) + Box-Muller ----
+    // ---- Cryptographically Secure PRNG (Web Crypto API crypto.getRandomValues with 4096-element buffer & mulberry32 fallback) + Box-Muller ----
     function makeRng(seed = null) {
         if (seed === null && typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            const bufSize = 4096;
+            const buf = new Uint32Array(bufSize);
+            let ptr = bufSize;
             return function () {
-                const arr = new Uint32Array(1);
-                crypto.getRandomValues(arr);
-                return arr[0] / 4294967296;
+                if (ptr >= bufSize) {
+                    crypto.getRandomValues(buf);
+                    ptr = 0;
+                }
+                return buf[ptr++] / 4294967296;
             };
         }
         let s = (seed || 42) >>> 0;

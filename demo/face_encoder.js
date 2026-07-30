@@ -8,13 +8,18 @@ const FaceEncoder = (() => {
     const DIM = 512;
     let userDatabase = [];
 
-    // Cryptographically Secure PRNG using Web Crypto API (crypto.getRandomValues) with mulberry32 fallback for deterministic tests
+    // Cryptographically Secure PRNG using Web Crypto API (crypto.getRandomValues with 4096-element buffer) with mulberry32 fallback for deterministic tests
     function makeSecureRng(seed = null) {
         if (seed === null && typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            const bufSize = 4096;
+            const buf = new Uint32Array(bufSize);
+            let ptr = bufSize;
             return function () {
-                const arr = new Uint32Array(1);
-                crypto.getRandomValues(arr);
-                return arr[0] / 4294967296;
+                if (ptr >= bufSize) {
+                    crypto.getRandomValues(buf);
+                    ptr = 0;
+                }
+                return buf[ptr++] / 4294967296;
             };
         }
         let a = (seed || 9999) >>> 0;
