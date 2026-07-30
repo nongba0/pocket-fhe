@@ -144,26 +144,19 @@ const FHE = (() => {
 
     initRoots(n); initRoots(N);
 
-    // ---- run(seed, payloadsIn) ----
-    // payloadsIn: Float64Array 1개(ct 0에 적재) 또는 배열(최대 k개 — ct 0..m-1에 적재).
-    // 각 원소 ∈ [-127,127]. 나머지 ct는 난수. 결과: recovered = 적재 ct들의 복구
-    // 슬롯 배열, recovered0 = recovered[0] (하위 호환).
-    function run(seed = 42, payloadsIn = null) {
-        const payloads = payloadsIn == null ? null
-            : Array.isArray(payloadsIn) ? payloadsIn.slice(0, k) : [payloadsIn];
-        const rng = makeRng(seed);
-        const gLUT = makeGauss(rng, sigma_lut);
-        const gKS  = makeGauss(rng, sigma_ks);
-        const gEval= makeGauss(rng, sigma_eval);
+    // ---- KSK Evaluation Key Caching Module ----
+    let keyCache = null;
 
+    function generateEvaluationKeys(krng) {
+        const gKS = makeGauss(krng, sigma_ks);
         const stfhe = new Float64Array(n);
-        for (let i = 0; i < n; ++i) stfhe[i] = rng() < 0.5 ? 0 : 1;
+        for (let i = 0; i < n; ++i) stfhe[i] = krng() < 0.5 ? 0 : 1;
         const semb = embed(stfhe);
 
         const Sidx = new Int32Array(hS), Sq = new Float64Array(N);
         const idxPool = Array.from({ length: N }, (_, i) => i);
         for (let i = 0; i < hS; ++i) {
-            const pick = Math.floor(rng() * idxPool.length);
+            const pick = Math.floor(krng() * idxPool.length);
             const pos = idxPool.splice(pick, 1)[0];
             const val = i % 2 === 0 ? 1 : -1;
             Sidx[i] = pos;
@@ -173,7 +166,7 @@ const FHE = (() => {
         const KSK = [];
         for (let t = 0; t < ell; ++t) {
             const aK = new Float64Array(N), bK = new Float64Array(N);
-            for (let i = 0; i < N; ++i) aK[i] = Math.floor(rng() * q);
+            for (let i = 0; i < N; ++i) aK[i] = Math.floor(krng() * q);
             const aS = negmul(aK, Sq);
             const Bgt = powmod(Bg, t);
             for (let i = 0; i < N; ++i) {
@@ -181,6 +174,43 @@ const FHE = (() => {
             }
             KSK.push({ a: aK, b: bK });
         }
+
+        return { stfhe, semb, Sq, KSK };
+    }
+
+    function getOrGenerateKeys(opts, rng) {
+        if (opts.useCache !== false && keyCache !== null) {
+            return keyCache;
+        }
+        const krng = opts.deterministic ? rng : makeRng(null);
+        const keys = generateEvaluationKeys(krng);
+        if (opts.useCache !== false) {
+            keyCache = keys;
+        }
+        return keys;
+    }
+
+    function initKeys(seed = null) {
+        const krng = seed !== null ? makeRng(seed) : makeRng(null);
+        keyCache = generateEvaluationKeys(krng);
+        return keyCache;
+    }
+
+    function clearKeyCache() {
+        keyCache = null;
+    }
+
+    // ---- run(seed, payloadsIn, opts) ----
+    // payloadsIn: Float64Array 1개(ct 0에 적재) 또는 배열(최대 k개 — ct 0..m-1에 적재).
+    function run(seed = 42, payloadsIn = null, opts = {}) {
+        const payloads = payloadsIn == null ? null
+            : Array.isArray(payloadsIn) ? payloadsIn.slice(0, k) : [payloadsIn];
+        const rng = makeRng(seed);
+        const gLUT = makeGauss(rng, sigma_lut);
+        const gEval= makeGauss(rng, sigma_eval);
+
+        // KSK 키 캐싱 모듈 사용 (최초 1회 생성 후 수십 ms로 단축!)
+        const { stfhe, semb, Sq, KSK } = getOrGenerateKeys(opts, rng);
 
         const ctsA = [], ctsB = [], Mexp = new Float64Array(N);
         for (let j = 0; j < k; ++j) {
@@ -252,7 +282,7 @@ const FHE = (() => {
             const y = (q / (2 * Math.PI)) * Math.sin(2 * Math.PI * ph / q) + gEval();
             const rec = Math.round(y / A_amp);
             if (rec === Mexp[p]) exact++;
-            const jj = p % k; // ct jj의 슬롯 위치 = i·k + jj
+            const jj = p % k;
             if (jj < numRec) recovered[jj][(p - jj) / k] = rec;
         }
 
@@ -268,7 +298,7 @@ const FHE = (() => {
     }
 
     // ---- 512-dim Single Biometric Engine ----
-    function runBiometricAuthCustom(liveVector, templateVector, seed = 888) {
+    function runBiometricAuthCustom(liveVector, templateVector, seed = 888, opts = {}) {
         const dQ = new Float64Array(n);
         let sqDistPlain = 0;
         for (let i = 0; i < n; ++i) {
@@ -278,7 +308,7 @@ const FHE = (() => {
             sqDistPlain += d * d;
         }
 
-        const base = run(seed, dQ);
+        const base = run(seed, dQ, opts);
 
         let sqDist = 0, transportExact = true;
         for (let i = 0; i < n; ++i) {
@@ -305,15 +335,10 @@ const FHE = (() => {
     }
 
     // ---- 512-dim Multi-User 1:N Biometric Search Engine ----
-    // 정직성 규약 + B* 스토리: 배치 차원 k(=16)가 곧 갤러리 차원이다.
-    // ct j에 "live vs template_j" 차분 벡터를 실어 한 번의 파이프라인 통과로
-    // 최대 k명의 거리를 동시 계산하고, 사용자별 sqDist와 최종 판정은 전부
-    // 복호 복구된 슬롯 값(recovered[j])에서 계산한다. (LUT 단계는 노이즈 모델)
-    function runMultiUserBiometricAuth(liveVector, db, seed = 888) {
-        const users = db.slice(0, k); // k=16명 초과분은 다음 배치(현 데모는 1배치)
+    function runMultiUserBiometricAuth(liveVector, db, seed = 888, opts = {}) {
+        const users = db.slice(0, k);
         const truncated = db.length > k;
 
-        // 1) 사용자별 차분 벡터 양자화 → k개 페이로드
         const payloads = [];
         const plainDists = [];
         for (let u = 0; u < users.length; ++u) {
@@ -329,10 +354,8 @@ const FHE = (() => {
             plainDists.push(sq);
         }
 
-        // 2) 전원 동시에 파이프라인 통과 (배치 = 갤러리)
-        const base = run(seed, payloads);
+        const base = run(seed, payloads, opts);
 
-        // 3) 사용자별 거리·판정은 복구 슬롯에서 계산
         let bestUser = null, minSqDist = Infinity, allTransportExact = true;
         const allResults = [];
         for (let u = 0; u < users.length; ++u) {
@@ -371,7 +394,7 @@ const FHE = (() => {
         };
     }
 
-    function runBiometricAuth(seed = 888) {
+    function runBiometricAuth(seed = 888, opts = {}) {
         const rng = makeRng(seed);
         const templateFace = new Float64Array(n);
         for (let i = 0; i < n; ++i) templateFace[i] = Math.floor(rng() * 21) - 10;
@@ -382,10 +405,10 @@ const FHE = (() => {
             liveFace[i] = templateFace[i] + Math.round(gNoise());
         }
 
-        return runBiometricAuthCustom(liveFace, templateFace, seed);
+        return runBiometricAuthCustom(liveFace, templateFace, seed, opts);
     }
 
-    return { run, runBiometricAuth, runBiometricAuthCustom, runMultiUserBiometricAuth, params: { N, n, k, ell } };
+    return { run, runBiometricAuth, runBiometricAuthCustom, runMultiUserBiometricAuth, initKeys, clearKeyCache, params: { N, n, k, ell } };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FHE;

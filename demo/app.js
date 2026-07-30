@@ -46,6 +46,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     btnClear.addEventListener('click', () => { logOutput.innerHTML = ''; });
 
+    // Warm up and pre-compute KSK evaluation keys on startup (KSK Caching)
+    setTimeout(() => {
+        const t0 = performance.now();
+        FHE.initKeys();
+        const initMs = performance.now() - t0;
+        log(`[KSK Key Caching] 0.36GB KSK 스위칭 키 사전 생성 및 캐싱 완료 (${initMs.toFixed(0)} ms) — 이후 실시간 검색 반응 속도가 대폭 단축됩니다!`, 'success');
+    }, 100);
+
     let runSeed = 42;
     let userRegisteredTemplate = null;
 

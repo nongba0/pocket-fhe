@@ -31,7 +31,7 @@ const FaceEncoder = (() => {
         const rng = makeSecureRng(9999);
         const template = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
-            template[i] = Math.floor(rng() * 21) - 10; // [-10, 10]
+            template[i] = Math.floor(rng() * 101) - 50; // [-50, 50]
         }
         return template;
     }
@@ -44,12 +44,12 @@ const FaceEncoder = (() => {
 
             const bobRng = makeSecureRng(8888);
             const bob = new Float64Array(DIM);
-            for (let i = 0; i < DIM; i++) bob[i] = Math.floor(bobRng() * 21) - 10;
+            for (let i = 0; i < DIM; i++) bob[i] = Math.floor(bobRng() * 101) - 50;
             userDatabase.push({ id: 2, name: "Bob (사용자 2)", vector: bob });
 
             const charlieRng = makeSecureRng(7777);
             const charlie = new Float64Array(DIM);
-            for (let i = 0; i < DIM; i++) charlie[i] = Math.floor(charlieRng() * 21) - 10;
+            for (let i = 0; i < DIM; i++) charlie[i] = Math.floor(charlieRng() * 101) - 50;
             userDatabase.push({ id: 3, name: "Charlie (사용자 3)", vector: charlie });
         }
         return userDatabase;
@@ -90,7 +90,7 @@ const FaceEncoder = (() => {
         const rng = makeSecureRng(seed);
         const live = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
-            live[i] = Math.floor(rng() * 21) - 10;
+            live[i] = Math.floor(rng() * 101) - 50;
         }
         return { name: "Bob (타인 - Bob Live Scan)", vector: live, template };
     }
