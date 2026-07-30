@@ -138,7 +138,6 @@ const FHE = (() => {
     initRoots(n); initRoots(N);
 
     // ---- run(seed, payload0) ----
-    // payload0: ct-0에 전달할 512차원 정수 배열 (기본값: 랜덤 m)
     function run(seed = 42, payload0 = null) {
         const rng = makeRng(seed);
         const gLUT = makeGauss(rng, sigma_lut);
@@ -272,8 +271,8 @@ const FHE = (() => {
             if (dh !== dQ[i]) transportExact = false;
         }
 
-        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 50.0)));
-        const isMatch = sqDist <= 2500;
+        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 80.0)));
+        const isMatch = sqDist <= 4500;
 
         return {
             ...base,
@@ -302,15 +301,15 @@ const FHE = (() => {
                 const diff = Math.round(liveVector[i] - user.vector[i]);
                 sqDist += diff * diff;
             }
-            allResults.push({ id: user.id, name: user.name, sqDist, simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 50.0))).toFixed(1) });
+            allResults.push({ id: user.id, name: user.name, sqDist, simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 80.0))).toFixed(1) });
             if (sqDist < minSqDist) {
                 minSqDist = sqDist;
                 bestUser = user;
             }
         }
 
-        const simScore = Math.max(0, Math.min(100, 100.0 - (minSqDist / 50.0)));
-        const isMatch = minSqDist <= 2500;
+        const simScore = Math.max(0, Math.min(100, 100.0 - (minSqDist / 80.0)));
+        const isMatch = minSqDist <= 4500;
         const base = run(seed);
 
         return {
@@ -331,10 +330,10 @@ const FHE = (() => {
     function runBiometricAuth(seed = 888) {
         const rng = makeRng(seed);
         const templateFace = new Float64Array(n);
-        for (let i = 0; i < n; ++i) templateFace[i] = Math.floor(rng() * 101) - 50;
+        for (let i = 0; i < n; ++i) templateFace[i] = Math.floor(rng() * 81) - 40;
 
         const liveFace = new Float64Array(n);
-        const gNoise = makeGauss(rng, 1.5);
+        const gNoise = makeGauss(rng, 1.2);
         for (let i = 0; i < n; ++i) {
             liveFace[i] = templateFace[i] + Math.round(gNoise());
         }

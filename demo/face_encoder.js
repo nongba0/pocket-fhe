@@ -1,4 +1,4 @@
-// face_encoder.js — MobileFaceNet CPU 512차원 특징점 벡터 및 다중 사용자 DB 관리자
+// face_encoder.js — MobileFaceNet CPU 512차원 특징점 벡터 및 공간 그리드 풀링 노이즈 정규화
 'use strict';
 
 const FaceEncoder = (() => {
@@ -19,7 +19,7 @@ const FaceEncoder = (() => {
         const rng = mulberry32(9999);
         const template = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
-            template[i] = Math.floor(rng() * 101) - 50; // [-50, 50]
+            template[i] = Math.floor(rng() * 81) - 40; // [-40, 40]
         }
         return template;
     }
@@ -32,12 +32,12 @@ const FaceEncoder = (() => {
 
             const bobRng = mulberry32(8888);
             const bob = new Float64Array(DIM);
-            for (let i = 0; i < DIM; i++) bob[i] = Math.floor(bobRng() * 101) - 50;
+            for (let i = 0; i < DIM; i++) bob[i] = Math.floor(bobRng() * 81) - 40;
             userDatabase.push({ id: 2, name: "Bob (사용자 2)", vector: bob });
 
             const charlieRng = mulberry32(7777);
             const charlie = new Float64Array(DIM);
-            for (let i = 0; i < DIM; i++) charlie[i] = Math.floor(charlieRng() * 101) - 50;
+            for (let i = 0; i < DIM; i++) charlie[i] = Math.floor(charlieRng() * 81) - 40;
             userDatabase.push({ id: 3, name: "Charlie (사용자 3)", vector: charlie });
         }
         return userDatabase;
@@ -66,7 +66,7 @@ const FaceEncoder = (() => {
         const rng = mulberry32(seed);
         const live = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
-            const noise = Math.round((rng() - 0.5) * 4);
+            const noise = Math.round((rng() - 0.5) * 2);
             live[i] = template[i] + noise;
         }
         return { name: "Alice (동일인 - Alice Live Scan)", vector: live, template };
@@ -78,12 +78,12 @@ const FaceEncoder = (() => {
         const rng = mulberry32(seed);
         const live = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
-            live[i] = Math.floor(rng() * 101) - 50;
+            live[i] = Math.floor(rng() * 81) - 40;
         }
         return { name: "Bob (타인 - Bob Live Scan)", vector: live, template };
     }
 
-    // Extract 512-dim Feature Vector from Real Live Camera Canvas Frame
+    // Extract 512-dim Feature Vector via 16x32 Grid Spatial Block Pooling & Mean Normalization
     function extractFromCanvas(canvas) {
         const ctx = canvas.getContext('2d');
         const width = canvas.width || 320;
@@ -97,16 +97,57 @@ const FaceEncoder = (() => {
         }
 
         const vector = new Float64Array(DIM);
-        const totalPixels = imgData.length / 4;
-        const step = Math.floor(totalPixels / DIM);
+        
+        // Define central face bounding region
+        const startX = Math.floor(width * 0.15);
+        const startY = Math.floor(height * 0.10);
+        const cropW = Math.floor(width * 0.70);
+        const cropH = Math.floor(height * 0.80);
 
-        for (let i = 0; i < DIM; i++) {
-            const pxIdx = (i * step) * 4;
-            const r = imgData[pxIdx] || 0;
-            const g = imgData[pxIdx + 1] || 0;
-            const b = imgData[pxIdx + 2] || 0;
-            const gray = Math.round(0.299 * r + 0.587 * g + 0.114 * b);
-            vector[i] = Math.round((gray / 255.0) * 100.0 - 50.0);
+        const rows = 16;
+        const cols = 32; // 16 * 32 = 512 cells
+        const cellW = Math.max(1, Math.floor(cropW / cols));
+        const cellH = Math.max(1, Math.floor(cropH / rows));
+
+        let globalSum = 0;
+        const cellMeans = new Float64Array(DIM);
+
+        for (let r = 0; r < rows; ++r) {
+            for (let c = 0; c < cols; ++c) {
+                const idx = r * cols + c;
+                let cellPixelSum = 0;
+                let count = 0;
+
+                const cX0 = startX + c * cellW;
+                const cY0 = startY + r * cellH;
+
+                for (let y = cY0; y < cY0 + cellH && y < height; ++y) {
+                    for (let x = cX0; x < cX0 + cellW && x < width; ++x) {
+                        const pxIdx = (y * width + x) * 4;
+                        const red = imgData[pxIdx];
+                        const green = imgData[pxIdx + 1];
+                        const blue = imgData[pxIdx + 2];
+                        const gray = 0.299 * red + 0.587 * green + 0.114 * blue;
+                        cellPixelSum += gray;
+                        count++;
+                    }
+                }
+
+                const meanGray = count > 0 ? (cellPixelSum / count) : 128;
+                cellMeans[idx] = meanGray;
+                globalSum += meanGray;
+            }
+        }
+
+        const globalMean = globalSum / DIM;
+
+        // Mean subtraction & scaling into [-40, 40]
+        for (let i = 0; i < DIM; ++i) {
+            const norm = (cellMeans[i] - globalMean); // [-128, 128] centered
+            let val = Math.round((norm / 128.0) * 40.0);
+            if (val > 40) val = 40;
+            if (val < -40) val = -40;
+            vector[i] = val;
         }
 
         return vector;
