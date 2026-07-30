@@ -52,7 +52,30 @@ graph TD
 - **Exact Recovery**: **8,192 / 8,192 slots PASS (100% Explicit Recovery)**
 - **Hardened Parameters**: $N=8192, n=512, k=16, B_g = 32 (2^5), \ell = 6$, $\sigma_{\text{LUT}} = 6.3 \times 10^{-7} \cdot q$
 - **Glue Latency (Native x86)**: **3.0 – 3.7 μs / value** (30.3 ms for 8,192 slot batch)
-- **Peak Execution RAM**: **6.2 MB** (`e2e_pipeline.cpp`) / **20.4 MB** (`arm_glue.cpp`)
+---
+
+## 🛡️ Threat Model & Production Deployment Architecture
+
+Pocket-FHE is designed around an untrusted cloud / edge server model:
+
+```mermaid
+sequenceDiagram
+    participant User as 📱 Client Device (Secret Key Owner)
+    participant Cloud as ☁️ Untrusted Matching Server / Cloud
+    
+    User->>User: 1. Local Face ID / Sensor Capture
+    User->>User: 2. Encrypt Features with Secret Key s
+    User->>Cloud: 3. Send Ciphertext Enc(v) to Untrusted Server
+    Note over Cloud: Cloud stores Encrypted Database Enc(u_i)<br/>Cloud CANNOT see plaintext vectors
+    Cloud->>Cloud: 4. Compute Homomorphic Distance & Switch Scheme (Pocket-FHE)
+    Cloud->>User: 5. Return 1-bit Encrypted Match Result
+    User->>User: 6. Decrypt Match Result (Access Granted / Denied)
+```
+
+### Threat Assumptions & Security Guarantees
+1. **Untrusted Storage & Server**: The template database $\mathbf{u}_i$ is stored fully encrypted ($\text{Enc}(\mathbf{u}_i)$) on untrusted cloud servers. The server process never sees unencrypted biometric features.
+2. **Zero Plaintext Visibility**: The matching engine performs homomorphic evaluation entirely on ciphertexts. Neither raw face templates nor intermediate distance vectors are exposed to the cloud server or network eavesdroppers.
+3. **Production Homomorphic Subtraction Note**: In demonstration modes, difference vectors $\mathbf{d}_i = \mathbf{v} - \mathbf{u}_i$ are encoded for fast pipeline verification. In production CKKS deployments, vector subtraction is computed homomorphically as $\text{Enc}(\mathbf{v}) - \text{Enc}(\mathbf{u}_i)$ directly in the CKKS domain prior to scheme switching.
 
 ---
 

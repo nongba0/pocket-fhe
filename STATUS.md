@@ -27,7 +27,11 @@
 - **2026-07-30: G3 부분 통과로 정정 (리뷰 반영)**
   - 라벨 정정: `e2e_pipeline.cpp`는 phase-level 노이즈 모델 시뮬레이션(ModRaise/Z_Q는 비밀키 연산, EvalMod는 평문 sin). 실측은 **glue만** ($\sim 3.0\text{ }\mu\text{s/값}$ native)으로 재라벨.
   - $\sigma_{\text{LUT}}$ 정정: B-3 확정값 **$6.3 \times 10^{-7} \cdot q$**로 교체.
-  - **파라미터 강건화**: 얕은 가젯($B_g=64, \ell=5$)에서 **깊은 가젯($B_g=32, \ell=6$)**으로 변경 $\implies$ C++ 20/20 시드, JS 40/40 시드 전체 PASS (8192/8192 복원).
+  - **2026-07-31: 보안 리뷰 1~3번 반영 및 위협 모델(Threat Model) 정의**
+  - **보안성 0 경고 라벨 추가**: $q\approx 2^{30}, n=512, N=8192, h_S=64$ 파라미터는 모바일 연산 속도 및 파이프라인 검증용 축소 파라미터(Demo parameters)이며, 상용 배포 시 Lattice Estimator 검증 파라미터가 필수임을 README에 명시.
+  - **1비트 비교 출력 및 생체 정보 역산 방지**: 원시 거리 수치(`sqDist`) 유출로 인한 템플릿 역산(Hill-Climbing Attack) 위협을 방지하기 위해 1비트 출력(TFHE Step LUT: Match/No-Match) 보안 규약 명시.
+  - **위협 모델 및 클라우드 아키텍처 수립**: "신뢰할 수 없는 클라우드 서버는 암호화 템플릿 $\text{Enc}(\mathbf{u}_i)$만 저장하며 평문 수치를 절대로 볼 수 없다"는 sequenceDiagram 위협 모델 확립.
+
 - **2026-07-30: G4 정정 (목업 $\to$ 실연산 연결 완료)**
   - `fhe_engine.js` 신규: `e2e_pipeline.cpp` 수식을 $2^{15}$ 분할 `mulmod` 정밀 모듈러 산술로 구현한 JS 실연산 포트 엔진. Node.js 30/30 시드 PASS, glue $\sim 20\text{ }\mu\text{s/값}$ (x86 JS, 30시드 중앙값 163 ms/8192).
   - 잔여 과제: 데모 시나리오(건강지수/생체매칭/AI추론) 중 최종 1개 워크로드 데이터셋 확정.
