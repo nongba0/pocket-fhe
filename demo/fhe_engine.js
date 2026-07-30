@@ -271,8 +271,8 @@ const FHE = (() => {
             if (dh !== dQ[i]) transportExact = false;
         }
 
-        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 80.0)));
-        const isMatch = sqDist <= 4500;
+        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 120.0)));
+        const isMatch = sqDist <= 6000;
 
         return {
             ...base,
@@ -301,15 +301,15 @@ const FHE = (() => {
                 const diff = Math.round(liveVector[i] - user.vector[i]);
                 sqDist += diff * diff;
             }
-            allResults.push({ id: user.id, name: user.name, sqDist, simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 80.0))).toFixed(1) });
+            allResults.push({ id: user.id, name: user.name, sqDist, simScore: Math.max(0, Math.min(100, 100.0 - (sqDist / 120.0))).toFixed(1) });
             if (sqDist < minSqDist) {
                 minSqDist = sqDist;
                 bestUser = user;
             }
         }
 
-        const simScore = Math.max(0, Math.min(100, 100.0 - (minSqDist / 80.0)));
-        const isMatch = minSqDist <= 4500;
+        const simScore = Math.max(0, Math.min(100, 100.0 - (minSqDist / 120.0)));
+        const isMatch = minSqDist <= 6000;
         const base = run(seed);
 
         return {
@@ -330,7 +330,7 @@ const FHE = (() => {
     function runBiometricAuth(seed = 888) {
         const rng = makeRng(seed);
         const templateFace = new Float64Array(n);
-        for (let i = 0; i < n; ++i) templateFace[i] = Math.floor(rng() * 81) - 40;
+        for (let i = 0; i < n; ++i) templateFace[i] = Math.floor(rng() * 21) - 10;
 
         const liveFace = new Float64Array(n);
         const gNoise = makeGauss(rng, 1.2);
