@@ -8,9 +8,12 @@
 [![Key Budget](https://img.shields.io/badge/Key%20Budget-0.36%20GB-orange.svg)]()
 [![Status](https://img.shields.io/badge/History-STATUS.md-green.svg)](STATUS.md)
 
-Pocket-FHE is a mobile-first, ultra-lightweight Homomorphic Encryption (FHE) engine designed to run privacy-preserving computations directly on smartphones (Apple Silicon A-series, Snapdragon) and edge devices without cloud dependency.
+
+> [!WARNING]
+> **Security Disclaimer**: The parameters used in this demonstration repository ($q \approx 2^{30}, n=512, N=8192, h_S=64$) are reduced demo parameters engineered for functional pipeline testing and mobile performance profiling. No security level is claimed — production deployments require parameters validated by a lattice security estimator (e.g., LWE Estimator / OpenFHE security standards).
 
 ---
+
 
 ## 🎯 Why Pocket-FHE?
 

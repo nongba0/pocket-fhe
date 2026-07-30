@@ -120,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const db = FaceEncoder.getDatabase();
 
         log(`[1:N 검색] ${db.length}명의 차분 벡터를 k=16 배치 암호문에 실어 한 번의 파이프라인으로 동시 처리 (배치 = 갤러리)`, 'highlight');
+        log(`[TFHE Threshold Step LUT] 생체 정보 역산 방지(Hill-Climbing Prevention)를 위한 1비트 비교 출력`, 'info');
 
         btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true; btnSearch1N.disabled = true;
         statusBadge.textContent = 'Executing 1:N Search...';
@@ -143,7 +144,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const totalMs = performance.now() - tTotal0;
 
             const multi = result.multiBiometric;
-            log(`[1:N 복호 결과] 복구된 슬롯에서 사용자별 제곱거리 계산 (평문 대조: ${multi.allTransportExact ? '전원 정확 수송 ✓' : '불일치 ✗'}):`, 'info');
+            log(`[1:N 복호 결과] TFHE Threshold Step LUT 1비트 비교 판정 (평문 대조: ${multi.allTransportExact ? '전원 정확 수송 ✓' : '불일치 ✗'}):`, 'info');
             multi.allResults.forEach(r => {
                 log(`  - ${r.name}: 제곱거리=${r.sqDist} (유사도: ${r.simScore}%)`, r.sqDist <= 40000 ? 'success' : 'info');
             });
@@ -200,6 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const bio = result.biometric;
             log(`[복호 판정] 복구된 512개 차분값에서 제곱거리 = ${bio.sqDist} (평문 대조: ${bio.transportExact ? '512/512 정확 수송 ✓' : '불일치 ✗'})`, 'highlight');
+            log(`[TFHE Threshold Step LUT] 생체 정보 역산 공격 방지 1비트 출력 (1=Match, 0=No-Match)`, 'info');
             log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
 
             log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
@@ -244,8 +246,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const totalMs = performance.now() - tTotal0;
 
             const bio = result.biometric;
-            log(`[Face ID 동형 거리 연산] 512차원 특징점 제곱거리 = ${bio.sqDist}`, 'highlight');
-            log(`[Face ID 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
+            log(`[복호 판정] 복구된 512개 차분값에서 제곱거리 = ${bio.sqDist} (평문 대조: ${bio.transportExact ? '512/512 정확 수송 ✓' : '불일치 ✗'})`, 'highlight');
+            log(`[TFHE Threshold Step LUT] 생체 정보 역산 공격 방지 1비트 출력 (1=Match, 0=No-Match)`, 'info');
+            log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
 
             log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
                 `= ${result.usPerValue.toFixed(1)} µs/값`, 'success');
