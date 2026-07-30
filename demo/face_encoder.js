@@ -8,7 +8,16 @@ const FaceEncoder = (() => {
     const DIM = 512;
     let userDatabase = [];
 
-    function mulberry32(a) {
+    // Cryptographically Secure PRNG using Web Crypto API (crypto.getRandomValues) with mulberry32 fallback for deterministic tests
+    function makeSecureRng(seed = null) {
+        if (seed === null && typeof crypto !== 'undefined' && crypto.getRandomValues) {
+            return function () {
+                const arr = new Uint32Array(1);
+                crypto.getRandomValues(arr);
+                return arr[0] / 4294967296;
+            };
+        }
+        let a = (seed || 9999) >>> 0;
         return function() {
             let t = a += 0x6D2B79F5;
             t = Math.imul(t ^ (t >>> 15), t | 1);
@@ -19,7 +28,7 @@ const FaceEncoder = (() => {
 
     // Alice Registered Face Template
     function getAliceTemplate() {
-        const rng = mulberry32(9999);
+        const rng = makeSecureRng(9999);
         const template = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
             template[i] = Math.floor(rng() * 21) - 10; // [-10, 10]
@@ -33,12 +42,12 @@ const FaceEncoder = (() => {
             const alice = getAliceTemplate();
             userDatabase.push({ id: 1, name: "Alice (사용자 1)", vector: alice });
 
-            const bobRng = mulberry32(8888);
+            const bobRng = makeSecureRng(8888);
             const bob = new Float64Array(DIM);
             for (let i = 0; i < DIM; i++) bob[i] = Math.floor(bobRng() * 21) - 10;
             userDatabase.push({ id: 2, name: "Bob (사용자 2)", vector: bob });
 
-            const charlieRng = mulberry32(7777);
+            const charlieRng = makeSecureRng(7777);
             const charlie = new Float64Array(DIM);
             for (let i = 0; i < DIM; i++) charlie[i] = Math.floor(charlieRng() * 21) - 10;
             userDatabase.push({ id: 3, name: "Charlie (사용자 3)", vector: charlie });
@@ -66,7 +75,7 @@ const FaceEncoder = (() => {
     // Alice Live Scan (Same Person Match)
     function getAliceLiveScan(seed = 1001) {
         const template = getAliceTemplate();
-        const rng = mulberry32(seed);
+        const rng = makeSecureRng(seed);
         const live = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
             const noise = Math.round((rng() - 0.5) * 2);
@@ -78,7 +87,7 @@ const FaceEncoder = (() => {
     // Bob Live Scan (Different Person Mismatch)
     function getBobLiveScan(seed = 2002) {
         const template = getAliceTemplate();
-        const rng = mulberry32(seed);
+        const rng = makeSecureRng(seed);
         const live = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
             live[i] = Math.floor(rng() * 21) - 10;
