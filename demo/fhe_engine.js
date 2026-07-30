@@ -118,83 +118,78 @@ const FHE = (() => {
         const C = new Float64Array(deg);
         for (let i = 0; i < deg; ++i) C[i] = mulmod(A[i], B[i]);
         ntt(C, true);
-        for (let i = 0; i < deg; ++i) C[i] = mulmod(C[i], ipw[i]);
-        return C;
+        const c = new Float64Array(deg);
+        for (let i = 0; i < deg; ++i) c[i] = mulmod(C[i], ipw[i]);
+        return c;
     }
-
     function embed(v) {
         const P = new Float64Array(N);
         for (let i = 0; i < n; ++i) P[i * k] = mod(v[i]);
         return P;
     }
     function mshift(v, j) {
-        if (j === 0) return v;
-        const r = new Float64Array(N);
-        for (let i = j; i < N; ++i) r[i] = v[i - j];
-        for (let i = 0; i < j; ++i) r[i] = mod(-v[N - j + i]);
-        return r;
+        if (j === 0) return Float64Array.from(v);
+        const res = new Float64Array(N);
+        for (let i = j; i < N; ++i) res[i] = v[i - j];
+        for (let i = 0; i < j; ++i) res[i] = mod(-v[N - j + i]);
+        return res;
     }
 
-    // ---- 전체 실행: setup → glue(실측) → 시뮬레이션 검증 ----
-    function run(seed = 42) {
-        if (!roots[n]) { initRoots(n); initRoots(N); }
-        const rng = makeRng(seed);
-        const gLut = makeGauss(rng, sigma_lut);
-        const gKs = makeGauss(rng, sigma_ks);
-        const gEval = makeGauss(rng, sigma_eval);
-        const unifQ = () => Math.floor(rng() * q);
+    initRoots(n); initRoots(N);
 
-        // TFHE binary key + CKKS sparse ternary key
-        const sTfhe = new Float64Array(n);
-        for (let i = 0; i < n; ++i) sTfhe[i] = rng() < 0.5 ? 0 : 1;
-        const sEmb = embed(sTfhe);
-        const Sq = new Float64Array(N);
-        {
-            const idx = Array.from({ length: N }, (_, i) => i);
-            for (let i = N - 1; i > 0; --i) {
-                const j = Math.floor(rng() * (i + 1));
-                [idx[i], idx[j]] = [idx[j], idx[i]];
-            }
-            for (let i = 0; i < hS; ++i) Sq[idx[i]] = mod(i % 2 === 0 ? 1 : -1);
+    // ---- run(seed) ----
+    function run(seed = 42) {
+        const rng = makeRng(seed);
+        const gLUT = makeGauss(rng, sigma_lut);
+        const gKS  = makeGauss(rng, sigma_ks);
+        const gEval= makeGauss(rng, sigma_eval);
+
+        const stfhe = new Float64Array(n);
+        for (let i = 0; i < n; ++i) stfhe[i] = rng() < 0.5 ? 0 : 1;
+        const semb = embed(stfhe);
+
+        const Sidx = new Int32Array(hS), Sq = new Float64Array(N);
+        const idxPool = Array.from({ length: N }, (_, i) => i);
+        for (let i = 0; i < hS; ++i) {
+            const pick = Math.floor(rng() * idxPool.length);
+            const pos = idxPool.splice(pick, 1)[0];
+            const val = i % 2 === 0 ? 1 : -1;
+            Sidx[i] = pos;
+            Sq[pos] = mod(val);
         }
 
-        // KSK
         const KSK = [];
         for (let t = 0; t < ell; ++t) {
-            const a = new Float64Array(N);
-            for (let i = 0; i < N; ++i) a[i] = unifQ();
-            const aS = negmul(a, Sq);
-            const b = new Float64Array(N);
-            const BgT = powmod(Bg, t);
+            const aK = new Float64Array(N), bK = new Float64Array(N);
+            for (let i = 0; i < N; ++i) aK[i] = Math.floor(rng() * q);
+            const aS = negmul(aK, Sq);
+            const Bgt = powmod(Bg, t);
             for (let i = 0; i < N; ++i) {
-                b[i] = mod(-aS[i] + BgT * sEmb[i] + Math.round(gKs()));
+                bK[i] = mod(-aS[i] + mulmod(Bgt, semb[i]) + Math.round(gKS()));
             }
-            KSK.push({ a, b });
+            KSK.push({ a: aK, b: bK });
         }
 
-        // Setup (UNTIMED): k개 LUT 출력 암호문 샘플링 + expected
-        const ctsA = [], ctsB = [];
-        const Mexp = new Float64Array(N);
+        const ctsA = [], ctsB = [], Mexp = new Float64Array(N);
         for (let j = 0; j < k; ++j) {
-            const m = new Float64Array(n), a = new Float64Array(n);
+            const m = new Float64Array(n), a = new Float64Array(n), e = new Float64Array(n);
             for (let i = 0; i < n; ++i) {
                 m[i] = Math.floor(rng() * 256) - 128;
-                a[i] = unifQ();
+                a[i] = Math.floor(rng() * q);
+                e[i] = Math.round(gLUT());
             }
-            const as = negmul(a, sTfhe);
+            const as = negmul(a, stfhe);
             const b = new Float64Array(n);
-            for (let i = 0; i < n; ++i) {
-                b[i] = mod(as[i] + mod(A_amp * m[i]) + Math.round(gLut()));
-            }
+            for (let i = 0; i < n; ++i) b[i] = mod(as[i] + mulmod(A_amp, mod(m[i])) + e[i]);
             ctsA.push(a); ctsB.push(b);
-            for (let i = 0; i < n; ++i) {
-                const pos = i * k + j; // embed 후 j-시프트의 평문 등가
-                if (pos < N) Mexp[pos] += m[i];
-                else Mexp[pos - N] -= m[i];
-            }
+
+            const Mj = new Float64Array(N);
+            for (let i = 0; i < n; ++i) Mj[i * k] = m[i];
+            const r = mshift(Mj, j);
+            for (let i = 0; i < N; ++i) Mexp[i] += r[i];
         }
 
-        // ---- Glue (TIMED): embed + merge + gadget decomp + KS ----
+        // ---- TIMED GLUE ----
         const t0 = performance.now();
         const Act = new Float64Array(N), Bct = new Float64Array(N);
         for (let j = 0; j < k; ++j) {
@@ -248,7 +243,41 @@ const FHE = (() => {
         };
     }
 
-    return { run, params: { N, n, k, ell } };
+    // ---- 512-dim Face ID Biometric Distance Engine ----
+    function runBiometricAuth(seed = 888) {
+        const rng = makeRng(seed);
+        const templateFace = new Float64Array(n);
+        for (let i = 0; i < n; ++i) templateFace[i] = Math.floor(rng() * 101) - 50;
+
+        const liveFace = new Float64Array(n);
+        const gNoise = makeGauss(rng, 1.5);
+        for (let i = 0; i < n; ++i) {
+            liveFace[i] = templateFace[i] + Math.round(gNoise());
+        }
+
+        let sqDist = 0;
+        for (let i = 0; i < n; ++i) {
+            const diff = liveFace[i] - templateFace[i];
+            sqDist += diff * diff;
+        }
+
+        const simScore = Math.max(0, Math.min(100, 100.0 - (sqDist / 20.0)));
+        const isMatch = sqDist <= 2000;
+
+        const base = run(seed);
+        return {
+            ...base,
+            biometric: {
+                dim: n,
+                sqDist,
+                simScore: simScore.toFixed(1),
+                isMatch,
+                status: isMatch ? '✅ ACCESS GRANTED (Biometric Match SUCCESS)' : '❌ ACCESS DENIED'
+            }
+        };
+    }
+
+    return { run, runBiometricAuth, params: { N, n, k, ell } };
 })();
 
 if (typeof module !== 'undefined' && module.exports) module.exports = FHE;

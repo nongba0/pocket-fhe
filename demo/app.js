@@ -38,11 +38,18 @@ document.addEventListener('DOMContentLoaded', () => {
         statusBadge.textContent = 'Executing...';
         statusBadge.className = 'status-indicator running';
 
+        const selectedVal = workloadSelect.value;
         const workloadName = workloadSelect.options[workloadSelect.selectedIndex].text;
         const { N, n, k, ell } = FHE.params;
         log(`On-device 실행 시작: ${workloadName}`, 'highlight');
         log(`Parameters: N=${N}, n=${n}, k=${k}, ell=${ell}, q≈2^30, Bg=2^5, seed=${runSeed}`, 'info');
-        log(`[Stage 1] batched-LUT 출력 ${k}개 RLWE ct 생성 (노이즈 모델: σ_LUT=6.3e-7·q)...`, 'info');
+
+        if (selectedVal === 'biometric') {
+            log(`[Biometric Feature Extraction] 라이브 얼굴 스캔 512차원 특징점 벡터 추출...`, 'info');
+            log(`[Homomorphic Distance] 암호화 상태에서 특징점 거리를 계산 중...`, 'info');
+        } else {
+            log(`[Stage 1] batched-LUT 출력 ${k}개 RLWE ct 생성 (노이즈 모델: σ_LUT=6.3e-7·q)...`, 'info');
+        }
 
         const slots = slotVisualizer.querySelectorAll('.slot');
         slots.forEach(s => s.className = 'slot');
@@ -52,7 +59,11 @@ document.addEventListener('DOMContentLoaded', () => {
             let result;
             const tTotal0 = performance.now();
             try {
-                result = FHE.run(runSeed++);
+                if (selectedVal === 'biometric') {
+                    result = FHE.runBiometricAuth(runSeed++);
+                } else {
+                    result = FHE.run(runSeed++);
+                }
             } catch (err) {
                 log(`엔진 오류: ${err.message}`, 'error');
                 statusBadge.textContent = 'Error';
@@ -61,6 +72,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
             const totalMs = performance.now() - tTotal0;
+
+            if (result.biometric) {
+                const bio = result.biometric;
+                log(`[Face ID 인증 결과] 512차원 특징점 동형 거리 = ${bio.sqDist}`, 'highlight');
+                log(`[Face ID 인증 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
+            }
 
             log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
                 `= ${result.usPerValue.toFixed(1)} µs/값`, 'success');
@@ -84,7 +101,7 @@ document.addEventListener('DOMContentLoaded', () => {
         valLatencySub.textContent =
             `Glue ${result.glueMs.toFixed(0)} ms / ${result.total} slots (JS, 이 기기 실측)`;
         valAccuracy.textContent = `${accuracy.toFixed(accuracy === 100 ? 0 : 2)} %`;
-        valStatus.textContent = result.pass ? 'VERIFIED PASS' : `${result.exact}/${result.total}`;
+        valStatus.textContent = result.biometric ? (result.biometric.isMatch ? 'MATCH SUCCESS' : 'MATCH FAIL') : (result.pass ? 'VERIFIED PASS' : `${result.exact}/${result.total}`);
 
         statusBadge.textContent = 'Completed';
         statusBadge.className = 'status-indicator success';

@@ -1,4 +1,5 @@
 const FHE = require('./fhe_engine.js');
-console.log("Running fhe_engine.js...");
-const res = FHE.run(12345);
-console.log("Result:", JSON.stringify(res, null, 2));
+console.log("Testing FHE.runBiometricAuth(888)...");
+const bioRes = FHE.runBiometricAuth(888);
+console.log("Biometric Result:", JSON.stringify(bioRes.biometric, null, 2));
+console.log("FHE Pass:", bioRes.pass, "Glue Latency:", bioRes.usPerValue.toFixed(2), "us/value");
