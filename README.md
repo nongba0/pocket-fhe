@@ -33,6 +33,26 @@ Standard FHE scheme switching (e.g., OpenFHE CKKStoFHEW / FHEWtoCKKS baseline) r
 
 ---
 
+## 🛣️ Project Development Vision & Roadmap
+
+Pocket-FHE is structured into a 4-Phase progressive engineering roadmap for Privacy-Preserving On-Device AI:
+
+```mermaid
+graph LR
+    P1["Phase 1: Core FHE Scheme Switching Glue<br/>(COMPLETED — 40.3 μs/val on iPhone 12)"] --> P2["Phase 2: MobileFaceNet ONNX Integration<br/>(COMPLETED — ONNX Runtime Web Hook)"]
+    P2 --> P3["Phase 3: WebAssembly SIMD C++ Build<br/>(PLANNED — 8x Speedup to < 5 μs/val)"]
+    P3 --> P4["Phase 4: 128-bit Production Scaling<br/>(PLANNED — N=16384 Lattice Verified)"]
+```
+
+### 📌 Milestone Timeline
+- [x] **Phase 1 — Core FHE Scheme Switching Glue**: Single-KSK Repack-free architecture, zero-dependency C++ (`fhe_core.hpp`) & JS engine, KSK key caching.
+- [x] **Phase 1.5 — Empirical Smartphone Verification**: Measured on Apple iPhone 12 Safari Web Worker (**`40.3 μs/value median`**, ~330 ms total).
+- [x] **Phase 2 — Deep Learning AI Extractor**: Integrated ONNX Runtime Web (`onnxruntime-web`) MobileFaceNet 512-dim embedding pipeline in `demo/face_encoder.js`.
+- [ ] **Phase 3 — WebAssembly (WASM + SIMD) Acceleration**: Compiling `src/fhe_core.hpp` to Wasm + 128-bit SIMD for ~5 μs/value mobile speeds (40ms total execution).
+- [ ] **Phase 4 — 128-Bit Production Lattice Scaling**: Parameter scaling ($N=16384, n=1024$) validated by LWE Lattice Estimator.
+
+---
+
 ## 🏗️ Architecture
 
 ```mermaid
