@@ -30,9 +30,13 @@
   - **2026-07-31: 보안 리뷰 1~3번 반영 및 위협 모델(Threat Model) 정의**
   - **보안성 0 경고 라벨 추가**: $q\approx 2^{30}, n=512, N=8192, h_S=64$ 파라미터는 모바일 연산 속도 및 파이프라인 검증용 축소 파라미터(Demo parameters)이며, 상용 배포 시 Lattice Estimator 검증 파라미터가 필수임을 README에 명시.
   - **1비트 비교 출력 및 생체 정보 역산 방지**: 원시 거리 수치(`sqDist`) 유출로 인한 템플릿 역산(Hill-Climbing Attack) 위협을 방지하기 위해 1비트 출력(TFHE Step LUT: Match/No-Match) 보안 규약 명시.
-- **2026-07-31: LFW(Labeled Faces in the Wild) 3,096장 실측 벤치마크 & Deep Embedding 필요성 검증**
-  - **원시 픽셀 조명 변형 한계 (Raw Spatial Grid)**: 얼라인먼트 없는 3,096장 원시 이미지 픽셀 윤곽거리 분석 시 포즈/배경 변형으로 수치 분리성 1.1배($\text{FAR}=17.2\%, \text{FRR}=66.2\%$).
-  - **Deep Feature Embedding (MobileFaceNet / Pocket-FHE)**: 512차원 정규화 딥 임베딩 적용 시 수치 분리성 **41.6배**($\text{Same Dist}=1,936\text{ vs } \text{Diff Dist}=80,498$) 및 **$\text{FAR}=0.0\%, \text{FRR}=0.0\%$ (정확도 100%)** 수치 판별성 달성. 딥러닝 임베딩 모듈과 동형암호 엔진 바인딩의 당위성 증명.
+- **2026-07-31: ~~LFW 실측 벤치마크~~ → 정정: 합성(synthetic) 분리성 벤치마크**
+  - 기존 `test_lfw_benchmark.py`는 이름과 달리 **LFW를 로드하지 않고 np.random 합성
+    벡터를 생성**했음 — "실측"·"MobileFaceNet" 표기는 허위라 폐기(deprecated 스텁으로 교체).
+  - 정직 버전 `test_synthetic_gallery_benchmark.py`: 합성 62명/1,560스캔, 인코더 스케일
+    (±15) 모사. 결과: 분리비 41.6× (동일인 1,936 vs 타인 80,499), threshold 40,000에서
+    TPR/TNR 100% — **프로토콜 분리성 검증일 뿐, 실환경 FAR/FRR로 인용 금지**.
+  - 미완 과제: 실데이터(LFW fetch + 실제 임베딩 모델) 벤치마크.
 
 
 
