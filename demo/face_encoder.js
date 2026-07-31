@@ -44,14 +44,26 @@ const FaceEncoder = (() => {
         };
     }
 
+    // Helper function to scale and L2-normalize vectors to [-15, 15]
+    function normalizeVector(rawVec) {
+        let sumSq = 0;
+        for (let i = 0; i < DIM; i++) sumSq += rawVec[i] * rawVec[i];
+        const norm = Math.sqrt(sumSq) || 1.0;
+        const normVec = new Float64Array(DIM);
+        for (let i = 0; i < DIM; i++) {
+            normVec[i] = Math.max(-15, Math.min(15, Math.round((rawVec[i] / norm) * 200.0)));
+        }
+        return normVec;
+    }
+
     // Alice Registered Face Template
     function getAliceTemplate() {
         const rng = makeSecureRng(9999);
         const template = new Float64Array(DIM);
         for (let i = 0; i < DIM; i++) {
-            template[i] = Math.floor(rng() * 101) - 50; // [-50, 50]
+            template[i] = Math.floor(rng() * 101) - 50;
         }
-        return template;
+        return normalizeVector(template);
     }
 
     // Default Pre-loaded Multi-Users
@@ -65,14 +77,14 @@ const FaceEncoder = (() => {
             for (let i = 0; i < DIM; i++) {
                 bob[i] = Math.floor(bobRng() * 101) - 50;
             }
-            userDatabase.push({ id: 2, name: "Bob (사용자 2)", vector: bob });
+            userDatabase.push({ id: 2, name: "Bob (사용자 2)", vector: normalizeVector(bob) });
 
             const charlieRng = makeSecureRng(7777);
             const charlie = new Float64Array(DIM);
             for (let i = 0; i < DIM; i++) {
                 charlie[i] = Math.floor(charlieRng() * 101) - 50;
             }
-            userDatabase.push({ id: 3, name: "Charlie (사용자 3)", vector: charlie });
+            userDatabase.push({ id: 3, name: "Charlie (사용자 3)", vector: normalizeVector(charlie) });
         }
         return userDatabase;
     }
@@ -83,8 +95,8 @@ const FaceEncoder = (() => {
         const noiseRng = makeSecureRng(seed);
 
         for (let i = 0; i < DIM; i++) {
-            const noise = Math.floor(noiseRng() * 9) - 4; // [-4, 4]
-            liveVector[i] = aliceTemplate[i] + noise;
+            const noise = Math.floor(noiseRng() * 3) - 1; // [-1, 1] noise
+            liveVector[i] = Math.max(-15, Math.min(15, aliceTemplate[i] + noise));
         }
 
         return { name: "Alice Live Scan (동일 인물)", vector: liveVector, template: aliceTemplate };
@@ -98,7 +110,7 @@ const FaceEncoder = (() => {
             bobVector[i] = Math.floor(bobRng() * 101) - 50;
         }
 
-        return { name: "Bob Scan (타인)", vector: bobVector, template: aliceTemplate };
+        return { name: "Bob Scan (타인)", vector: normalizeVector(bobVector), template: aliceTemplate };
     }
 
     function extractFromCanvas(canvas) {
@@ -135,10 +147,20 @@ const FaceEncoder = (() => {
                     }
                 }
                 const avgLum = count > 0 ? (sumLum / count) : 128;
-                vector[idx] = Math.round((avgLum - 128) / 2.5); // Normalize to [-50, 50]
+                vector[idx] = avgLum - 128;
             }
         }
-        return vector;
+
+        // Apply L2 Unit Normalization scaled to [-15, 15] integer range matching calibrated ROC boundary
+        let sumSq = 0;
+        for (let i = 0; i < DIM; i++) sumSq += vector[i] * vector[i];
+        const norm = Math.sqrt(sumSq) || 1.0;
+
+        const normalizedVector = new Float64Array(DIM);
+        for (let i = 0; i < DIM; i++) {
+            normalizedVector[i] = Math.max(-15, Math.min(15, Math.round((vector[i] / norm) * 200.0)));
+        }
+        return normalizedVector;
     }
 
     // MobileFaceNet ONNX Embedding Extractor with Fallback
