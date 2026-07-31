@@ -31,9 +31,11 @@
   - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari Browser Web Worker)
   - **실측 수치**: 5회 측정치 `39.8`, `40.8`, `40.6`, `40.3`, `40.0` $\mu\text{s/값}$ (**중앙값: 40.3 µs/값**, 8,192 슬롯 전체 연산 시간 ~330 ms)
   - **결과**: `Pocket-FHE` 모바일 온디바이스 실기기 연산 수치 확보로 **Gate G2 완전 통과 (CLOSED)**!
-- **2026-08-01: Phase 2 ONNX MobileFaceNet AI 딥 임베딩 파이프라인 연동**
-  - **ONNX Runtime Web 탑재**: `demo/face_encoder.js` 및 `demo/index.html`에 ONNX Runtime Web (`onnxruntime-web`) 기반 `mobilefacenet.onnx` AI 임베딩 세션 훅 적용.
-  - **온디바이스 AI 가속**: WebGL/WASM 기반 초경량(4.1MB) AI 얼굴 신경망 512차원 딥 임베딩 로컬 추출 지원.
+- **2026-08-01: ONNX MobileFaceNet 파이프라인 연동 후 아이폰 12 실기기 2차 실측 완료**
+  - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari Browser Web Worker)
+  - **ONNX 연동 후 실측치**: `42.8`, `41.7`, `41.1` $\mu\text{s/값}$ (**중앙값: 41.7 µs/값**, 전체 파이프라인 342 ms)
+  - **암호 수송 검증**: 512/512 정확 수송 및 8,192/8,192 슬롯 100% PASS 검증 확인!
+
 
 
 - **2026-07-31: ~~LFW 실측 벤치마크~~ → 정정: 합성(synthetic) 분리성 벤치마크**

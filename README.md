@@ -73,6 +73,7 @@ graph TD
 - **Hardened Parameters**: $N=8192, n=512, k=16, B_g = 32 (2^5), \ell = 6$, $\sigma_{\text{LUT}} = 6.3 \times 10^{-7} \cdot q$
 - **Glue Latency (Native x86)**: **3.0 – 3.7 μs / value** (30.3 ms for 8,192 slot batch)
 - **Glue Latency (Mobile Safari — Apple iPhone 12)**: **40.3 μs / value median** (5-run empirical: 39.8, 40.8, 40.6, 40.3, 40.0 μs/val; ~330 ms total execution)
+- **Glue Latency (Mobile Safari — Apple iPhone 12 + ONNX)**: **41.7 μs / value median** (3-run empirical: 42.8, 41.7, 41.1 μs/val; ~342 ms total pipeline execution)
 
 ### 📐 Comparison with Repack-Based Switching (verifiable sources only)
 
