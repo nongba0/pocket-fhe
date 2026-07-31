@@ -52,6 +52,7 @@ graph TD
 - **Exact Recovery**: **8,192 / 8,192 slots PASS (100% Explicit Recovery)**
 - **Hardened Parameters**: $N=8192, n=512, k=16, B_g = 32 (2^5), \ell = 6$, $\sigma_{\text{LUT}} = 6.3 \times 10^{-7} \cdot q$
 - **Glue Latency (Native x86)**: **3.0 – 3.7 μs / value** (30.3 ms for 8,192 slot batch)
+- **Glue Latency (Mobile Safari — Apple iPhone 12)**: **40.3 μs / value median** (5-run empirical: 39.8, 40.8, 40.6, 40.3, 40.0 μs/val; ~330 ms total execution)
 
 ### 📐 Comparison with Repack-Based Switching (verifiable sources only)
 

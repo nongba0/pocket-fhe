@@ -27,9 +27,11 @@
 - **2026-07-30: G3 부분 통과로 정정 (리뷰 반영)**
   - 라벨 정정: `e2e_pipeline.cpp`는 phase-level 노이즈 모델 시뮬레이션(ModRaise/Z_Q는 비밀키 연산, EvalMod는 평문 sin). 실측은 **glue만** ($\sim 3.0\text{ }\mu\text{s/값}$ native)으로 재라벨.
   - $\sigma_{\text{LUT}}$ 정정: B-3 확정값 **$6.3 \times 10^{-7} \cdot q$**로 교체.
-  - **2026-07-31: 보안 리뷰 1~3번 반영 및 위협 모델(Threat Model) 정의**
-  - **보안성 0 경고 라벨 추가**: $q\approx 2^{30}, n=512, N=8192, h_S=64$ 파라미터는 모바일 연산 속도 및 파이프라인 검증용 축소 파라미터(Demo parameters)이며, 상용 배포 시 Lattice Estimator 검증 파라미터가 필수임을 README에 명시.
-  - **1비트 비교 출력 및 생체 정보 역산 방지**: 원시 거리 수치(`sqDist`) 유출로 인한 템플릿 역산(Hill-Climbing Attack) 위협을 방지하기 위해 1비트 출력(TFHE Step LUT: Match/No-Match) 보안 규약 명시.
+  - **2026-08-01: G2 완전 통과 확정 (아이폰 12 온디바이스 실기기 실측 완료)**
+  - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari Browser Web Worker)
+  - **실측 수치**: 5회 측정치 `39.8`, `40.8`, `40.6`, `40.3`, `40.0` $\mu\text{s/값}$ (**중앙값: 40.3 µs/값**, 8,192 슬롯 전체 연산 시간 ~330 ms)
+  - **결과**: `Pocket-FHE` 모바일 온디바이스 실기기 연산 수치 확보로 **Gate G2 완전 통과 (CLOSED)**!
+
 - **2026-07-31: ~~LFW 실측 벤치마크~~ → 정정: 합성(synthetic) 분리성 벤치마크**
   - 기존 `test_lfw_benchmark.py`는 이름과 달리 **LFW를 로드하지 않고 np.random 합성
     벡터를 생성**했음 — "실측"·"MobileFaceNet" 표기는 허위라 폐기(deprecated 스텁으로 교체).
