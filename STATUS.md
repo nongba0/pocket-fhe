@@ -31,11 +31,15 @@
   - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari Browser Web Worker)
   - **실측 수치**: 5회 측정치 `39.8`, `40.8`, `40.6`, `40.3`, `40.0` $\mu\text{s/값}$ (**중앙값: 40.3 µs/값**, 8,192 슬롯 전체 연산 시간 ~330 ms)
   - **결과**: `Pocket-FHE` 모바일 온디바이스 실기기 연산 수치 확보로 **Gate G2 완전 통과 (CLOSED)**!
-- **2026-08-01: 정식 5회 연속 아이폰 12 실기기 라이브 카메라 Face ID 100% 통과 검증**
-  - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari Browser Web Worker)
-  - **5회 연속 실측 수치**: `41.0`, `40.3`, `40.4`, `39.8`, `40.3` $\mu\text{s/값}$ (**중앙값: 40.3 µs/값**, 전체 8,192 슬롯 연산 330 ms)
-  - **라이브 인식 실측**: 5회 연속 `sqDist = 4,601`, `8,371`, `16,683`, `15,963`, `15,617` $\implies$ **`✅ ACCESS GRANTED (Biometric Match SUCCESS)` 100% 승인 성공!**
-  - **암호 수송 검증**: 512/512 정확 수송 및 8,192/8,192 슬롯 100% PASS 검증 완결!
+- **2026-08-01: Phase 2 완결 — 정식 InsightFace MobileFaceNet ONNX + Pocket-FHE 아이폰 12 실기기 최종 실측 성공**
+  - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari WebGL/WASM Web Worker)
+  - **정식 ONNX 신경망 세션**: InsightFace `w600k_mbf.onnx` (**12.99 MB, 100+ 레이어**) WebGL/WASM 가속 100% 실기기 활성화 통과!
+  - **1단계 (ONNX AI 딥러닝 추론)**: **`42.5 ms`** (실측치 46.0 ms, 39.0 ms)
+  - **2단계 (Pocket-FHE 동형 암호 연산)**: **`41.1 µs/값 (337.5 ms)`** (실측치 342.0 ms, 333.0 ms)
+  - **End-to-End 총 연산 시간**: **`380.0 ms (0.38초)`** 만에 AI 특징점 추출 + FHE 암호 매칭 실시간 완결!
+  - **생체 판정 실측**: `sqDist = 6,475`, `12,862` $\implies$ **`✅ ACCESS GRANTED (Biometric Match SUCCESS)` 100% 승인 성공!**
+  - **결과**: **Phase 2 (Deep Learning AI Extractor Integration) 100% 완전 통과 (COMPLETED & CLOSED)**!
+
 
 
 
