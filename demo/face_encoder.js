@@ -13,16 +13,19 @@ const FaceEncoder = (() => {
             if (logger) logger(msg, 'success');
             return true;
         }
-        if (typeof ort !== 'undefined' && ort.InferenceSession) {
-            if (ort.env && ort.env.wasm) {
-                ort.env.wasm.wasmPaths = './';
+
+        const ortObj = (typeof ort !== 'undefined') ? ort : (typeof window !== 'undefined' ? window.ort : null);
+
+        if (ortObj && ortObj.InferenceSession) {
+            if (ortObj.env && ortObj.env.wasm) {
+                ortObj.env.wasm.wasmPaths = './';
             }
             if (logger) logger("[MobileFaceNet ONNX] 12.99MB ONNX AI 신경망 로딩 시작...", "info");
             const providers = [['webgl', 'wasm'], ['wasm'], []];
             for (const ep of providers) {
                 try {
                     const opts = ep.length > 0 ? { executionProviders: ep } : {};
-                    ortSession = await ort.InferenceSession.create(modelUrl, opts);
+                    ortSession = await ortObj.InferenceSession.create(modelUrl, opts);
                     const epStr = ep.length > 0 ? ep.join('/') : 'WASM default';
                     const msg = `[MobileFaceNet ONNX] AI 모델 세션이 ${epStr} 가속으로 활성화되었습니다!`;
                     console.log(msg);
@@ -36,8 +39,12 @@ const FaceEncoder = (() => {
             console.warn(warnMsg);
             if (logger) logger(warnMsg, 'warning');
             return false;
+        } else {
+            const infoMsg = "[MobileFaceNet ONNX Note] ONNX Runtime 객체(ort) 미로드 — 로컬 L2-정규화 512차원 인코더 모드로 구동됩니다.";
+            console.log(infoMsg);
+            if (logger) logger(infoMsg, 'info');
+            return false;
         }
-        return false;
     }
 
     function hasONNXSession() {
