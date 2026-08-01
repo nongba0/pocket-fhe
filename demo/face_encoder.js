@@ -182,12 +182,19 @@ const FaceEncoder = (() => {
                 }
 
                 const inputTensor = new ort.Tensor('float32', floatArr, [1, 3, 112, 112]);
-                const results = await ortSession.run({ input: inputTensor });
-                const embedding = results.output.data; // 512-dim float32 array
+                // 입출력 이름은 모델마다 다르므로(w600k_mbf: 'input.1'/'516') 동적으로 조회
+                const feeds = {};
+                feeds[ortSession.inputNames[0]] = inputTensor;
+                const results = await ortSession.run(feeds);
+                const embedding = results[ortSession.outputNames[0]].data; // 512-dim float32
 
+                // 임베딩을 L2 단위 정규화 후 ×200, ±15 클립 — 다른 모든 벡터와 동일 스케일
+                let sumSq = 0;
+                for (let i = 0; i < DIM; i++) sumSq += embedding[i] * embedding[i];
+                const eNorm = Math.sqrt(sumSq) || 1.0;
                 const quantized = new Float64Array(DIM);
                 for (let i = 0; i < DIM; i++) {
-                    quantized[i] = Math.max(-15, Math.min(15, Math.round(embedding[i] * 15.0)));
+                    quantized[i] = Math.max(-15, Math.min(15, Math.round((embedding[i] / eNorm) * 200.0)));
                 }
                 return quantized;
             } catch (err) {
