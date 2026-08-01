@@ -12,6 +12,8 @@ httpd = http.server.HTTPServer((bind_address, port), handler)
 import os
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
+os.chdir(dir_path)
+
 cert_path = os.path.join(dir_path, 'cert.pem')
 key_path = os.path.join(dir_path, 'key.pem')
 

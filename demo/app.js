@@ -62,6 +62,7 @@ document.addEventListener('DOMContentLoaded', () => {
         FHE.initKeys();
         const initMs = performance.now() - t0;
         log(`[KSK Key Caching] 0.36GB KSK 스위칭 키 사전 생성 및 캐싱 완료 (${initMs.toFixed(0)} ms) — 반응 속도 단축!`, 'success');
+        FaceEncoder.initMobileFaceNetONNX('mobilefacenet.onnx', log);
     }, 100);
 
     let runSeed = 42;
@@ -199,7 +200,8 @@ document.addEventListener('DOMContentLoaded', () => {
         statusBadge.textContent = 'Scanning Camera Face...';
         statusBadge.className = 'status-indicator running';
 
-        log(`[라이브 카메라 스캔] 카메라 프레임에서 512차원 특징점 추출 완료 (MobileFaceNet/ONNX 인코더 표준)`, 'highlight');
+        const encoderType = FaceEncoder.hasONNXSession() ? 'MobileFaceNet ONNX 딥러닝 세션 구동 (12.99MB 모델)' : '로컬 L2-정규화 폴백 인코더';
+        log(`[라이브 카메라 스캔] 카메라 프레임에서 512차원 특징점 추출 완료 (${encoderType})`, 'highlight');
         log(`[Pocket-FHE] 특징점 차분 벡터를 RLWE 암호문 실페이로드로 인코딩 — 스위치(glue)는 실연산`, 'info');
 
         const slots = slotVisualizer.querySelectorAll('.slot');
