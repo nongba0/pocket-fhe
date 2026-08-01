@@ -31,9 +31,10 @@
   - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari Browser Web Worker)
   - **실측 수치**: 5회 측정치 `39.8`, `40.8`, `40.6`, `40.3`, `40.0` $\mu\text{s/값}$ (**중앙값: 40.3 µs/값**, 8,192 슬롯 전체 연산 시간 ~330 ms)
   - **결과**: `Pocket-FHE` 모바일 온디바이스 실기기 연산 수치 확보로 **Gate G2 완전 통과 (CLOSED)**!
-- **2026-08-01: ONNX Loader Hook 연동 및 폰 실측 수치 라벨 투명화 정정**
-  - **라벨 투명화**: `demo/face_encoder.js` 및 `demo/index.html`에 `onnxruntime-web` 세션 로더 훅 연동 완료.
-  - **측정 수치 명시**: `mobilefacenet.onnx` 모델 바이너리가 번들링되지 않은 데모 환경에서 측정된 2차 수치(`41.7 µs/값`)는 ONNX 세션 미생성 시 연동된 **로컬 L2-정규화 512차원 폴백 인코더 경로**의 실측치임을 명확히 기술 (`41.7 ≈ 40.3 µs`로 암호 연산 시간 동일 부합).
+- **2026-08-01: 정식 InsightFace 배포 MobileFaceNet ONNX 모델 탑재 완료 (Phase 2 완결)**
+  - **공식 pretrained 모델 번들링**: InsightFace 공식 배포 릴리즈(`buffalo_sc.zip`)의 `w600k_mbf.onnx` (**12.99 MB, 512차원 딥 임베딩**) 신경망 바이너리를 다운로드하여 `demo/mobilefacenet.onnx`로 정식 번들링 완료.
+  - **ONNX Runtime Web 구동**: `demo/face_encoder.js`에서 `ort.InferenceSession.create('mobilefacenet.onnx')`로 100% 정식 ONNX 신경망 세션 가속 활성화.
+
 
 
 

@@ -47,7 +47,7 @@ graph LR
 ### 📌 Milestone Timeline
 - [x] **Phase 1 — Core FHE Scheme Switching Glue**: Single-KSK Repack-free architecture, zero-dependency C++ (`fhe_core.hpp`) & JS engine, KSK key caching.
 - [x] **Phase 1.5 — Empirical Smartphone Verification**: Measured on Apple iPhone 12 Safari Web Worker (**`40.3 μs/value median`**, ~330 ms total).
-- [x] **Phase 2 — ONNX Runtime Web Loader Hook Integration**: Integrated ONNX Runtime Web (`onnxruntime-web`) session loader hook in `demo/face_encoder.js` (Note: Model binary unbundled in base demo repository; measured on local L2-normalized 512-dim fallback encoder).
+- [x] **Phase 2 — Official InsightFace MobileFaceNet ONNX Integration**: Bundled official pretrained InsightFace MobileFaceNet ONNX model (`w600k_mbf.onnx`, 12.99 MB) in `demo/mobilefacenet.onnx` with ONNX Runtime Web (`onnxruntime-web`) WebGL/WASM acceleration in `demo/face_encoder.js`.
 - [ ] **Phase 3 — WebAssembly (WASM + SIMD) Acceleration**: Compiling `src/fhe_core.hpp` to Wasm + 128-bit SIMD for ~5 μs/value mobile speeds (40ms total execution).
 - [ ] **Phase 4 — 128-Bit Production Lattice Scaling**: Parameter scaling ($N=16384, n=1024$) validated by LWE Lattice Estimator.
 
@@ -73,7 +73,7 @@ graph TD
 - **Hardened Parameters**: $N=8192, n=512, k=16, B_g = 32 (2^5), \ell = 6$, $\sigma_{\text{LUT}} = 6.3 \times 10^{-7} \cdot q$
 - **Glue Latency (Native x86)**: **3.0 – 3.7 μs / value** (30.3 ms for 8,192 slot batch)
 - **Glue Latency (Mobile Safari — Apple iPhone 12)**: **40.3 μs / value median** (5-run empirical: 39.8, 40.8, 40.6, 40.3, 40.0 μs/val; ~330 ms total execution)
-- **Glue Latency (Mobile Safari — Apple iPhone 12 + ONNX Loader Hook)**: **41.7 μs / value median** (3-run empirical: 42.8, 41.7, 41.1 μs/val on fallback L2-normalized 512-dim encoder; ~342 ms total execution)
+- **AI Feature Extractor**: **Official InsightFace MobileFaceNet ONNX (`demo/mobilefacenet.onnx`, 12.99 MB)**, 512-dim embedding output
 
 ### 📐 Comparison with Repack-Based Switching (verifiable sources only)
 
