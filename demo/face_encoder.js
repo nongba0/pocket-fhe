@@ -9,6 +9,9 @@ const FaceEncoder = (() => {
     // Initialize MobileFaceNet ONNX Runtime Session (WebGL / WASM Acceleration)
     async function initMobileFaceNetONNX(modelUrl = 'mobilefacenet.onnx', logger = null) {
         if (typeof ort !== 'undefined' && ort.InferenceSession) {
+            if (ort.env && ort.env.wasm) {
+                ort.env.wasm.wasmPaths = './';
+            }
             if (logger) logger("[MobileFaceNet ONNX] 12.99MB ONNX AI 신경망 로딩 시작...", "info");
             const providers = [['webgl', 'wasm'], ['wasm'], []];
             for (const ep of providers) {
