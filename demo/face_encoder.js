@@ -9,18 +9,25 @@ const FaceEncoder = (() => {
     // Initialize MobileFaceNet ONNX Runtime Session (WebGL / WASM Acceleration)
     async function initMobileFaceNetONNX(modelUrl = 'mobilefacenet.onnx', logger = null) {
         if (typeof ort !== 'undefined' && ort.InferenceSession) {
-            try {
-                ortSession = await ort.InferenceSession.create(modelUrl, { executionProviders: ['webgl', 'wasm'] });
-                const msg = "[MobileFaceNet ONNX] AI 모델 세션이 WebGL/WASM 가속으로 활성화되었습니다!";
-                console.log(msg);
-                if (logger) logger(msg, 'info');
-                return true;
-            } catch (e) {
-                const warnMsg = "[MobileFaceNet ONNX Warning] 모델 로딩 실패/폴백 경고: " + e.message;
-                console.warn(warnMsg);
-                if (logger) logger(warnMsg, 'warning');
-                return false;
+            if (logger) logger("[MobileFaceNet ONNX] 12.99MB ONNX AI 신경망 로딩 시작...", "info");
+            const providers = [['webgl', 'wasm'], ['wasm'], []];
+            for (const ep of providers) {
+                try {
+                    const opts = ep.length > 0 ? { executionProviders: ep } : {};
+                    ortSession = await ort.InferenceSession.create(modelUrl, opts);
+                    const epStr = ep.length > 0 ? ep.join('/') : 'WASM default';
+                    const msg = `[MobileFaceNet ONNX] AI 모델 세션이 ${epStr} 가속으로 활성화되었습니다!`;
+                    console.log(msg);
+                    if (logger) logger(msg, 'success');
+                    return true;
+                } catch (e) {
+                    console.warn(`EP ${ep.join('/')} attempt failed:`, e.message);
+                }
             }
+            const warnMsg = "[MobileFaceNet ONNX Warning] ONNX 세션 로딩 실패 — 로컬 L2-정규화 폴백 인코더로 동작합니다.";
+            console.warn(warnMsg);
+            if (logger) logger(warnMsg, 'warning');
+            return false;
         }
         return false;
     }
