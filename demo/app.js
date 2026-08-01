@@ -104,29 +104,29 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     initCamera();
 
-    function captureCurrentCameraVector() {
+    async function captureCurrentCameraVector() {
         if (videoFeed.readyState === videoFeed.HAVE_ENOUGH_DATA) {
             cameraCanvas.width = videoFeed.videoWidth || 320;
             cameraCanvas.height = videoFeed.videoHeight || 240;
             const ctx = cameraCanvas.getContext('2d');
             ctx.drawImage(videoFeed, 0, 0, cameraCanvas.width, cameraCanvas.height);
-            return FaceEncoder.extractFromCanvas(cameraCanvas);
+            return await FaceEncoder.extractMobileFaceNetEmbedding(cameraCanvas, log);
         } else {
             return FaceEncoder.getAliceLiveScan(Date.now()).vector;
         }
     }
 
     // Register Single User Face
-    btnRegisterFace.addEventListener('click', () => {
-        userRegisteredTemplate = captureCurrentCameraVector();
+    btnRegisterFace.addEventListener('click', async () => {
+        userRegisteredTemplate = await captureCurrentCameraVector();
         cameraStatus.innerHTML = '<span style="color:#10b981; font-weight:bold;">✅ 내 얼굴 템플릿 등록 완료! 오른쪽 스캔 버튼을 누르세요.</span>';
         log(`[템플릿 등록] 현재 카메라 프레임에서 512차원 내 얼굴 특징점 템플릿을 등록했습니다!`, 'highlight');
     });
 
     // Add New User to Multi-User DB
-    btnAddUser.addEventListener('click', () => {
+    btnAddUser.addEventListener('click', async () => {
         const name = inputUsername.value.trim() || `사용자 ${FaceEncoder.getDatabase().length + 1}`;
-        const liveVector = captureCurrentCameraVector();
+        const liveVector = await captureCurrentCameraVector();
         FaceEncoder.addUser(name, liveVector);
         inputUsername.value = '';
         renderUserDatabaseUI();
@@ -134,8 +134,8 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Run 1:N Encrypted Search
-    btnSearch1N.addEventListener('click', () => {
-        const liveVector = captureCurrentCameraVector();
+    btnSearch1N.addEventListener('click', async () => {
+        const liveVector = await captureCurrentCameraVector();
         const db = FaceEncoder.getDatabase();
 
         log(`[1:N 검색] ${db.length}명의 차분 벡터를 k=16 배치 암호문에 실어 한 번의 파이프라인으로 동시 처리 (배치 = 갤러리)`, 'highlight');
@@ -186,11 +186,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // Scan Current Live Face
-    btnScanFace.addEventListener('click', () => {
+    btnScanFace.addEventListener('click', async () => {
         if (!userRegisteredTemplate) {
-            userRegisteredTemplate = captureCurrentCameraVector();
+            userRegisteredTemplate = await captureCurrentCameraVector();
         }
-        const liveVector = captureCurrentCameraVector();
+        const liveVector = await captureCurrentCameraVector();
         runLiveCameraBiometricAuth(liveVector, userRegisteredTemplate);
     });
 

@@ -7,18 +7,26 @@ const FaceEncoder = (() => {
     let ortSession = null;
 
     // Initialize MobileFaceNet ONNX Runtime Session (WebGL / WASM Acceleration)
-    async function initMobileFaceNetONNX(modelUrl = 'mobilefacenet.onnx') {
+    async function initMobileFaceNetONNX(modelUrl = 'mobilefacenet.onnx', logger = null) {
         if (typeof ort !== 'undefined' && ort.InferenceSession) {
             try {
                 ortSession = await ort.InferenceSession.create(modelUrl, { executionProviders: ['webgl', 'wasm'] });
-                console.log("[MobileFaceNet ONNX] AI 모델 세션이 WebGL/WASM 가속으로 활성화되었습니다!");
+                const msg = "[MobileFaceNet ONNX] AI 모델 세션이 WebGL/WASM 가속으로 활성화되었습니다!";
+                console.log(msg);
+                if (logger) logger(msg, 'info');
                 return true;
             } catch (e) {
-                console.warn("[MobileFaceNet ONNX Info] 모델 바이너리 미존재 시 경량 L2-정규화 512차원 인코더로 동작합니다:", e.message);
+                const warnMsg = "[MobileFaceNet ONNX Warning] 모델 로딩 실패/폴백 경고: " + e.message;
+                console.warn(warnMsg);
+                if (logger) logger(warnMsg, 'warning');
                 return false;
             }
         }
         return false;
+    }
+
+    function hasONNXSession() {
+        return ortSession !== null;
     }
 
     // Cryptographically Secure PRNG using Web Crypto API (crypto.getRandomValues with 4096-element buffer) with mulberry32 fallback for deterministic tests
@@ -164,9 +172,10 @@ const FaceEncoder = (() => {
     }
 
     // MobileFaceNet ONNX Embedding Extractor with Fallback
-    async function extractMobileFaceNetEmbedding(canvas) {
+    async function extractMobileFaceNetEmbedding(canvas, logger = null) {
         if (ortSession) {
             try {
+                const t0 = performance.now();
                 // Resize canvas to 112x112 MobileFaceNet input tensor format [1, 3, 112, 112]
                 const inputCanvas = document.createElement('canvas');
                 inputCanvas.width = 112; inputCanvas.height = 112;
@@ -182,11 +191,15 @@ const FaceEncoder = (() => {
                 }
 
                 const inputTensor = new ort.Tensor('float32', floatArr, [1, 3, 112, 112]);
-                // 입출력 이름은 모델마다 다르므로(w600k_mbf: 'input.1'/'516') 동적으로 조회
                 const feeds = {};
                 feeds[ortSession.inputNames[0]] = inputTensor;
                 const results = await ortSession.run(feeds);
                 const embedding = results[ortSession.outputNames[0]].data; // 512-dim float32
+                const tONNX = performance.now() - t0;
+
+                const msg = `[ONNX AI 실측] MobileFaceNet 100+ 레이어 신경망 추론 완료: ${tONNX.toFixed(1)} ms (WebGL/WASM 가속)`;
+                console.log(msg);
+                if (logger) logger(msg, 'success');
 
                 // 임베딩을 L2 단위 정규화 후 ×200, ±15 클립 — 다른 모든 벡터와 동일 스케일
                 let sumSq = 0;
@@ -198,7 +211,9 @@ const FaceEncoder = (() => {
                 }
                 return quantized;
             } catch (err) {
-                console.warn("[MobileFaceNet ONNX] Runtime inference fallback to local encoder:", err.message);
+                const warnMsg = "[MobileFaceNet ONNX Warning] 세션 추론 예외 (폴백 동작): " + err.message;
+                console.warn(warnMsg);
+                if (logger) logger(warnMsg, 'warning');
             }
         }
         return extractFromCanvas(canvas);
@@ -226,6 +241,7 @@ const FaceEncoder = (() => {
         extractFromCanvas,
         extractMobileFaceNetEmbedding,
         initMobileFaceNetONNX,
+        hasONNXSession,
         addUser,
         getDatabase
     };
