@@ -10,6 +10,10 @@ handler = http.server.SimpleHTTPRequestHandler
 httpd = http.server.HTTPServer((bind_address, port), handler)
 
 import os
+import mimetypes
+
+mimetypes.add_type('application/javascript', '.mjs')
+mimetypes.add_type('application/wasm', '.wasm')
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
 os.chdir(dir_path)
