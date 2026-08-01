@@ -8,6 +8,11 @@ const FaceEncoder = (() => {
 
     // Initialize MobileFaceNet ONNX Runtime Session (WebGL / WASM Acceleration)
     async function initMobileFaceNetONNX(modelUrl = 'mobilefacenet.onnx', logger = null) {
+        if (ortSession) {
+            const msg = "[MobileFaceNet ONNX] AI 모델 세션이 활성화 상태입니다!";
+            if (logger) logger(msg, 'success');
+            return true;
+        }
         if (typeof ort !== 'undefined' && ort.InferenceSession) {
             if (ort.env && ort.env.wasm) {
                 ort.env.wasm.wasmPaths = './';
@@ -241,7 +246,6 @@ const FaceEncoder = (() => {
     }
 
     initDefaultDatabase();
-    initMobileFaceNetONNX();
 
     return {
         DIM,
