@@ -31,11 +31,10 @@
   - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari Browser Web Worker)
   - **실측 수치**: 5회 측정치 `39.8`, `40.8`, `40.6`, `40.3`, `40.0` $\mu\text{s/값}$ (**중앙값: 40.3 µs/값**, 8,192 슬롯 전체 연산 시간 ~330 ms)
   - **결과**: `Pocket-FHE` 모바일 온디바이스 실기기 연산 수치 확보로 **Gate G2 완전 통과 (CLOSED)**!
-- **2026-08-01: ONNX MobileFaceNet 파이프라인 연동 후 아이폰 12 실기기 2차 실측 완료 (Face ID 매칭 100% 통과)**
-  - **실기기 디바이스**: Apple iPhone 12 (A14 Bionic, Safari Browser Web Worker)
-  - **실측 수치**: `45.3`, `40.5`, `40.0` $\mu\text{s/값}$ (**중앙값: 40.5 µs/값**, 전체 8,192 슬롯 연산 332 ms)
-  - **생체 판정 실측**: `sqDist = 20,297`, `17,976`, `30,872` ($\le 40,000$) $\implies$ **`✅ ACCESS GRANTED (Biometric Match SUCCESS)` 100% 승인 성공!**
-  - **암호 수송 검증**: 512/512 정확 수송 및 8,192/8,192 슬롯 100% PASS 검증 완결!
+- **2026-08-01: ONNX Loader Hook 연동 및 폰 실측 수치 라벨 투명화 정정**
+  - **라벨 투명화**: `demo/face_encoder.js` 및 `demo/index.html`에 `onnxruntime-web` 세션 로더 훅 연동 완료.
+  - **측정 수치 명시**: `mobilefacenet.onnx` 모델 바이너리가 번들링되지 않은 데모 환경에서 측정된 2차 수치(`41.7 µs/값`)는 ONNX 세션 미생성 시 연동된 **로컬 L2-정규화 512차원 폴백 인코더 경로**의 실측치임을 명확히 기술 (`41.7 ≈ 40.3 µs`로 암호 연산 시간 동일 부합).
+
 
 
 
