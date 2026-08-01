@@ -175,6 +175,11 @@ python -m http.server 8080 -d demo
 
 ---
 
-## 📜 License
+## 📜 License & Model Attribution
 
-MIT License. Developed for privacy-preserving on-device computing (2026).
+Pocket-FHE source code is released under the **MIT License**.
+
+### ⚠️ Pretrained Model License Exception (`demo/mobilefacenet.onnx`)
+- The bundled face recognition model [`demo/mobilefacenet.onnx`](demo/mobilefacenet.onnx) (12.99 MB, InsightFace `w600k_mbf.onnx`) is derived from the official release of [DeepInsight / InsightFace](https://github.com/deepinsight/insightface) (`buffalo_sc` model release).
+- **InsightFace Model License**: The pretrained model binary and weights in `demo/mobilefacenet.onnx` are provided strictly for **non-commercial academic research and educational evaluation purposes only** in accordance with the [InsightFace License Terms](https://github.com/deepinsight/insightface#license).
+- Commercial deployment requires obtaining a commercial license from InsightFace or substituting `demo/mobilefacenet.onnx` with a commercially permissive pretrained model.
