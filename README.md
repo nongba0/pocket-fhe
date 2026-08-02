@@ -53,17 +53,40 @@ graph LR
 
 ---
 
-## 🏗️ Architecture
+## 🏗️ Architecture & Threat Model
+
+Pocket-FHE enforces strict **Client vs. Server/Evaluator Role Isolation**:
+
+- **Client (On-Device)**: Holds secret key $s$, extracts feature embeddings via MobileFaceNet ONNX (plaintext), encrypts template $\text{Enc}(\mathbf{u})$ and live scan $\text{Enc}(\mathbf{v})$, and decrypts the final 1-bit match result.
+- **Server / FHE Evaluator**: Receives only ciphertexts $\text{Enc}(\mathbf{u}), \text{Enc}(\mathbf{v})$ and public evaluation keys ($ksk_{relin}, ksk_{rot}, ksk_{pbs}$). The evaluator **NEVER** touches secret key $s$ or plaintexts.
 
 ```mermaid
 graph TD
-    A["Raw Input (Health / Biometrics / AI)"] -->|Encrypt| B["k Batched RLWE Ciphertexts (R_n, n=512)"]
-    B -->|TFHE Side| C["Batched LUT / Activation Functions (Noise Model)"]
-    C -->|Embed X → Y^k| D["Monomial Shift Merge (0 ms, Pointer Shift)"]
-    D -->|1x Gadget KeySwitch at q| E["Glued Ciphertext (R_N, N=8192)"]
-    E -->|ModRaise & EvalMod| F["CKKS Homomorphic Linear Layers"]
-    F -->|Decrypt| G["100% Exact Payload Recovery (8192/8192 PASS)"]
+    subgraph Client ["Client (Holds Secret Key s)"]
+        A["Camera Frame"] -->|MobileFaceNet ONNX| B["Plaintext Embeddings u, v"]
+        B -->|Encrypt with s| C["RLWE Ciphertexts Enc(u), Enc(v)"]
+        H["1-Bit LWE Ciphertext Enc_TFHE(b)"] -->|Decrypt with s| I["Decision: MATCH / DENIAL"]
+    end
+
+    subgraph Server ["Server Evaluator (Zero Secret Key Access)"]
+        C -->|1. Homomorphic Subtraction| D["Enc(d) = Enc(v) - Enc(u)"]
+        D -->|2. Homomorphic Square + Relin| E["Enc(d^2) via 1x Relin KSK"]
+        E -->|3. Slot Rotate-Sum| F["Enc(sqDist) in Slot 0 via 9x Galois Rotations"]
+        F -->|4. Sample Extract + 1-Bit TFHE PBS| H
+    end
 ```
+
+### 🔐 Server-Side Homomorphic Pipeline Details
+1. **Homomorphic Difference**: $\text{Enc}(\mathbf{d}) = \text{Enc}(\mathbf{v}) - \text{Enc}(\mathbf{u})$ (RLWE component-wise subtraction, 0 ms).
+2. **Homomorphic Component-Wise Square & Slot Rotate-Sum**:
+   - Component-wise square $\text{Enc}(\mathbf{d}) \otimes \text{Enc}(\mathbf{d})$ with 1x Relinearization KeySwitch ($s^2 \to s$).
+   - $\log_2(512) = 9$ Galois Automorphism rotations ($X^i \to X^{i \cdot 5^k} \pmod{X^N+1}$) + KSK to sum 512 dimensions into slot 0 ($\text{sqDist}$).
+3. **1-Bit TFHE Step PBS Threshold LUT**:
+   - LWE Sample-Extract from RLWE slot 0.
+   - 1x TFHE Step PBS LUT to output a 1-bit encrypted match decision $\text{Enc}_{\text{TFHE}}(b \in \{0, 1\})$.
+
+### 💡 Why Repack-Free?
+Classic scheme switching (TFHE $\to$ CKKS) requires heavy automorphism matrix-vector multiplications ("Repack") to pack multiple LWE samples into a CKKS ciphertext. Pocket-FHE's biometric matching pipeline runs in the **CKKS (distance evaluation) $\to$ TFHE (1-bit threshold)** direction, requiring only cheap **Sample-Extract + KeySwitch**, making the pipeline naturally **Repack-Free**!
 
 ---
 

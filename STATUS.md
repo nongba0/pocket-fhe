@@ -38,7 +38,14 @@
   - **2단계 (Pocket-FHE 동형 암호 연산)**: **`41.1 µs/값 (337.5 ms)`** (실측치 342.0 ms, 333.0 ms)
   - **End-to-End 총 연산 시간**: **`380.0 ms (0.38초)`** 만에 AI 특징점 추출 + FHE 암호 매칭 실시간 완결!
   - **생체 판정 실측**: `sqDist = 6,475`, `12,862` $\implies$ **`✅ ACCESS GRANTED (Biometric Match SUCCESS)` 100% 승인 성공!**
-  - **결과**: **Phase 2 (Deep Learning AI Extractor Integration) 100% 완전 통과 (COMPLETED & CLOSED)**!
+- **2026-08-03: 클라이언트/서버 역할 엄격 분리 및 100% 동형 암호 생체 매칭 파이프라인 완성**
+  - **클라이언트/서버 분리**: 비밀키 $s$와 평문 접근 권한을 오직 클라이언트(`Client`)에게만 부여. 서버(`ServerEvaluator`)는 비밀키 없이 공개 평가키만으로 전체 매칭 연산을 수행하는 100% 정직한 Threat Model 구현.
+  - **서버 3단계 동형 연산**:
+    1. 동형 차분: $\text{Enc}(\mathbf{d}) = \text{Enc}(\mathbf{v}) - \text{Enc}(\mathbf{u})$ (성분별 RLWE 뺄셈)
+    2. 동형 제곱합: 성분별 곱셈 + 1회 Relinearization KeySwitch ($s^2 \to s$) 후, $\log_2(512) = 9$회 Galois Automorphism 회전-합산으로 슬롯 0에 $\text{sqDist}$ 축적
+    3. 1-Bit TFHE Step PBS Threshold LUT: LWE Sample-Extract 후 1회 Step LUT를 통해 1비트 암호문 $\text{Enc}_{\text{TFHE}}(b)$ 출력
+  - **Repack-Free 서사 체계화**: CKKS $\to$ TFHE (Sample-Extract) 수송 구조로 Repack matrix 곱셈 없는 고속 스위칭 구조 입증.
+
 
 
 

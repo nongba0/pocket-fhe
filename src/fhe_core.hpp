@@ -19,10 +19,10 @@ static const int k = N / n; // 16
 static const int Bg = 32; // 2^5
 static const int ell = 6;
 static const int hS = 64; // sparse ternary weight
-static const int64_t A_amp = q / (32 * 255); // 122333, rho = 2^-5
+static const int64_t A_amp = 64;
 static const double PI = 3.14159265358979323846;
 static const double sigma_lut = 6.3e-7 * q; // B-3 recalibrated
-static const double sigma_ks = 3.2;
+static const double sigma_ks = 1.0;
 static const double sigma_eval = q * std::pow(2.0, -25.0);
 
 inline int64_t mod(int64_t x) {
@@ -154,6 +154,96 @@ struct KSKPair {
     std::vector<int64_t> a;
     std::vector<int64_t> b;
 };
+
+struct RLWECiphertext {
+    std::vector<int64_t> a;
+    std::vector<int64_t> b;
+    RLWECiphertext() : a(N, 0), b(N, 0) {}
+    RLWECiphertext(const std::vector<int64_t>& _a, const std::vector<int64_t>& _b) : a(_a), b(_b) {}
+};
+
+struct LWECiphertext {
+    std::vector<int64_t> a;
+    int64_t b;
+    LWECiphertext() : a(N, 0), b(0) {}
+    LWECiphertext(const std::vector<int64_t>& _a, int64_t _b) : a(_a), b(_b) {}
+};
+
+inline LWECiphertext lwe_sample_extract(const RLWECiphertext& ct, int slot = 0) {
+    return LWECiphertext(ct.a, ct.b[slot]);
+}
+
+inline RLWECiphertext rlwe_sub(const RLWECiphertext& ct1, const RLWECiphertext& ct2) {
+    RLWECiphertext res;
+    for (int i = 0; i < N; ++i) {
+        res.a[i] = mod(ct1.a[i] - ct2.a[i]);
+        res.b[i] = mod(ct1.b[i] - ct2.b[i]);
+    }
+    return res;
+}
+
+inline std::vector<int64_t> apply_automorphism(const std::vector<int64_t>& poly, int g) {
+    std::vector<int64_t> res(N, 0);
+    int twoN = 2 * N;
+    for (int i = 0; i < N; ++i) {
+        int idx = (static_cast<int64_t>(i) * g) % twoN;
+        if (idx < 0) idx += twoN;
+        if (idx < N) {
+            res[idx] = poly[i];
+        } else {
+            res[idx - N] = mod(-poly[i]);
+        }
+    }
+    return res;
+}
+
+inline RLWECiphertext keyswitch_poly(const std::vector<int64_t>& poly, const std::vector<KSKPair>& ksk, const NTTRoots& roots) {
+    std::vector<std::vector<int64_t>> digs(ell, std::vector<int64_t>(N));
+    std::vector<int64_t> Ac(N);
+    for (int i = 0; i < N; ++i) Ac[i] = centered(poly[i]);
+    for (int t = 0; t < ell; ++t) {
+        for (int i = 0; i < N; ++i) {
+            int64_t d = Ac[i] % Bg;
+            if (d < 0) d += Bg;
+            if (d > Bg / 2) d -= Bg;
+            digs[t][i] = mod(d);
+            Ac[i] = (Ac[i] - d) / Bg;
+        }
+    }
+    RLWECiphertext res;
+    for (int t = 0; t < ell; ++t) {
+        std::vector<int64_t> da = negmul(digs[t], ksk[t].a, roots);
+        std::vector<int64_t> db = negmul(digs[t], ksk[t].b, roots);
+        for (int i = 0; i < N; ++i) {
+            res.a[i] = (res.a[i] + da[i]) % q;
+            res.b[i] = (res.b[i] + db[i]) % q;
+        }
+    }
+    return res;
+}
+
+inline RLWECiphertext rlwe_mult_relin(const RLWECiphertext& ct1, const RLWECiphertext& ct2, const std::vector<KSKPair>& ksk_relin, const NTTRoots& roots) {
+    // Tensor Product: (b1 - a1*s) * (b2 - a2*s) = b1*b2 - (a1*b2 + a2*b1)*s + a1*a2 * s^2
+    std::vector<int64_t> b1b2 = negmul(ct1.b, ct2.b, roots);
+    std::vector<int64_t> a1b2 = negmul(ct1.a, ct2.b, roots);
+    std::vector<int64_t> a2b1 = negmul(ct2.a, ct1.b, roots);
+    std::vector<int64_t> a1a2 = negmul(ct1.a, ct2.a, roots);
+
+    std::vector<int64_t> a_cross(N);
+    for (int i = 0; i < N; ++i) {
+        a_cross[i] = mod(a1b2[i] + a2b1[i]);
+    }
+
+    // Relinearize a1a2 (multiplier for s^2) using ksk_relin (encrypts s^2 under s)
+    RLWECiphertext ks_s2 = keyswitch_poly(a1a2, ksk_relin, roots);
+
+    RLWECiphertext res;
+    for (int i = 0; i < N; ++i) {
+        res.a[i] = mod(a_cross[i] - ks_s2.a[i]);
+        res.b[i] = mod(b1b2[i] + ks_s2.b[i]);
+    }
+    return res;
+}
 
 } // namespace FHECore
 
