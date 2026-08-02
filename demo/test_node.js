@@ -1,78 +1,112 @@
+// Pocket-FHE Node.js CI verification sweep.
+//
+// The load-bearing assertion is CORRECTNESS, not the verdict: every test checks
+// that the HOMOMORPHICALLY computed sqDist matches the plaintext ground truth
+// (|dec − plain| <= tolerance). A verdict-only test can pass on garbage values
+// that happen to straddle the threshold, which is exactly the class of bug
+// (negacyclic convolution vs. Σd², missing relinearization) this suite exists
+// to catch.
+
 const FHE = require('./fhe_engine.js');
 const FE = require('./face_encoder.js');
 
-console.log("=== Pocket-FHE Node.js CI Dual-Path Mechanical Verification Sweep ===");
+const TOLERANCE = 200;
+let failures = 0;
 
-// 1. Single Alice Match Test (Access Granted)
-const aliceScan = FE.getAliceLiveScan(888);
-const bioResAlice = FHE.runBiometricAuthCustom(aliceScan.vector, aliceScan.template, 888, { deterministic: true });
-console.log("Alice Match Status:", bioResAlice.biometric.status);
-console.log("Alice Slot Pass:", bioResAlice.pass, "| Glue Latency:", bioResAlice.usPerValue.toFixed(2), "us/value");
-
-if (!bioResAlice.pass || !bioResAlice.biometric.transportExact || !bioResAlice.biometric.isMatch) {
-    console.error("❌ Alice Match Verification Failed!");
-    process.exit(1);
+function check(cond, msg) {
+    if (!cond) { console.error('❌ ' + msg); failures++; }
+    return cond;
 }
 
-// 2. Single Bob Mismatch Test (Access Denied Expected)
-const bobScan = FE.getBobLiveScan(2002);
-const bioResBob = FHE.runBiometricAuthCustom(bobScan.vector, bobScan.template, 2002, { deterministic: true });
-console.log("Bob Mismatch Status:", bioResBob.biometric.status);
-
-if (!bioResBob.pass || !bioResBob.biometric.transportExact || bioResBob.biometric.isMatch) {
-    console.error("❌ Bob Mismatch Denial Verification Failed (False Accept Detected!)");
-    process.exit(1);
+function plainSqDist(live, template) {
+    let sq = 0;
+    for (let i = 0; i < 512; ++i) {
+        let d = Math.round(live[i] - template[i]);
+        if (d > 127) d = 127; else if (d < -127) d = -127;
+        sq += d * d;
+    }
+    return sq;
 }
 
-// 3. Inverted Vector Mismatch Test (Access Denied Expected)
-const invertedVector = new Float64Array(512);
-for (let i = 0; i < 512; i++) invertedVector[i] = -aliceScan.template[i];
-const bioResInverted = FHE.runBiometricAuthCustom(invertedVector, aliceScan.template, 3003, { deterministic: true });
-console.log("Inverted Vector Mismatch Status:", bioResInverted.biometric.status);
+// Runs one case and asserts homomorphic correctness + the expected verdict.
+function runCase(label, live, template, seed, expectMatch) {
+    const res = FHE.runBiometricAuthCustom(live, template, seed, { deterministic: true });
+    const bio = res.biometric;
+    const truth = plainSqDist(live, template);
+    const err = Math.abs(bio.sqDist - truth);
 
-if (!bioResInverted.pass || !bioResInverted.biometric.transportExact || bioResInverted.biometric.isMatch) {
-    console.error("❌ Inverted Vector Mismatch Denial Verification Failed!");
-    process.exit(1);
+    console.log(`${label}: dec sqDist=${bio.sqDist} (plain ${truth}, err ${err}) ` +
+                `-> ${bio.isMatch ? 'GRANT' : 'DENY'} | ${res.usPerValue.toFixed(2)} us/value`);
+
+    check(err <= TOLERANCE, `${label}: homomorphic sqDist deviates from ground truth (err ${err} > ${TOLERANCE})`);
+    check(bio.transportExact, `${label}: transportExact flag not set`);
+    check(res.pass, `${label}: pipeline pass flag not set`);
+    check(bio.isMatch === expectMatch,
+          `${label}: expected ${expectMatch ? 'GRANT' : 'DENY'} but got ${bio.isMatch ? 'GRANT' : 'DENY'}`);
+    return res;
 }
 
-// 4. 1:N Multi-User Search Test
+console.log('=== Pocket-FHE Node.js CI Verification Sweep ===');
+console.log('Assertion: homomorphic sqDist must match plaintext ground truth within ±' + TOLERANCE + '\n');
+
+// 1. Genuine user — expect GRANT.
+const alice = FE.getAliceLiveScan(888);
+runCase('Alice (genuine)', alice.vector, alice.template, 888, true);
+
+// 2. Impostor — expect DENY.
+const bob = FE.getBobLiveScan(2002);
+runCase('Bob (impostor)', bob.vector, bob.template, 2002, false);
+
+// 3. Sign-inverted vector — far from template, expect DENY.
+const inverted = new Float64Array(512);
+for (let i = 0; i < 512; i++) inverted[i] = -alice.template[i];
+runCase('Inverted vector', inverted, alice.template, 3003, false);
+
+// 4. Identical vectors — sqDist must decrypt to ~0. This pins the zero point and
+//    catches scale/offset errors that a threshold test would never notice.
+const selfRes = runCase('Self-match (d=0)', alice.template, alice.template, 4004, true);
+check(Math.abs(selfRes.biometric.sqDist) <= TOLERANCE,
+      `Self-match: sqDist should be ~0, got ${selfRes.biometric.sqDist}`);
+
+// 5. 1:N multi-user search — ranking must be driven by decrypted distances.
 const db = FE.getDatabase();
 const liveVector = FE.getAliceLiveScan(1001).vector;
-const multiRes = FHE.runMultiUserBiometricAuth(liveVector, db, 1001, { deterministic: true });
-console.log("1:N Multi-User Search Status:", multiRes.multiBiometric.status);
+const multi = FHE.runMultiUserBiometricAuth(liveVector, db, 1001, { deterministic: true });
+console.log(`\n1:N search: best=${multi.multiBiometric.bestUser} minSqDist=${multi.multiBiometric.minSqDist}`);
+for (const r of multi.multiBiometric.allResults) {
+    const err = Math.abs(r.sqDist - r.sqDistPlain);
+    console.log(`  ${r.name}: dec=${r.sqDist} plain=${r.sqDistPlain} (err ${err})`);
+    check(err <= TOLERANCE, `1:N ${r.name}: decrypted distance deviates from ground truth (err ${err})`);
+}
+check(multi.pass && multi.multiBiometric.allTransportExact, '1:N search: correctness flags not set');
+check(multi.multiBiometric.isMatch, '1:N search: genuine user not matched');
+check(multi.multiBiometric.bestUser.indexOf('Alice') !== -1,
+      `1:N search: wrong best user (${multi.multiBiometric.bestUser})`);
 
-if (!multiRes.pass || !multiRes.multiBiometric.allTransportExact || !multiRes.multiBiometric.isMatch || multiRes.multiBiometric.bestUser.indexOf("Alice") === -1) {
-    console.error("❌ 1:N Multi-User Search Verification Failed!");
+// 6. Multi-seed sweep — correctness must hold across independent key sets.
+const SEEDS = 8;
+let maxErrGenuine = 0, maxErrImpostor = 0, grants = 0, denials = 0;
+for (let s = 0; s < SEEDS; ++s) {
+    const seed = 100 + s;
+    const a = FE.getAliceLiveScan(1234 + s);
+    const ra = FHE.runBiometricAuthCustom(a.vector, a.template, seed, { deterministic: true });
+    maxErrGenuine = Math.max(maxErrGenuine, Math.abs(ra.biometric.sqDist - plainSqDist(a.vector, a.template)));
+    if (ra.biometric.isMatch) grants++;
+
+    const b = FE.getBobLiveScan(5678 + s);
+    const rb = FHE.runBiometricAuthCustom(b.vector, b.template, seed + 50, { deterministic: true });
+    maxErrImpostor = Math.max(maxErrImpostor, Math.abs(rb.biometric.sqDist - plainSqDist(b.vector, b.template)));
+    if (!rb.biometric.isMatch) denials++;
+}
+console.log(`\n${SEEDS}-seed sweep: max|err| genuine=${maxErrGenuine} impostor=${maxErrImpostor}, ` +
+            `grants=${grants}/${SEEDS}, denials=${denials}/${SEEDS}`);
+check(maxErrGenuine <= TOLERANCE, `Seed sweep: genuine max error ${maxErrGenuine} > ${TOLERANCE}`);
+check(maxErrImpostor <= TOLERANCE, `Seed sweep: impostor max error ${maxErrImpostor} > ${TOLERANCE}`);
+check(grants === SEEDS, `Seed sweep: only ${grants}/${SEEDS} genuine accepts`);
+check(denials === SEEDS, `Seed sweep: only ${denials}/${SEEDS} impostor denials (false accept detected)`);
+
+if (failures > 0) {
+    console.error(`\n❌ CI SWEEP FAILED: ${failures} check(s) failed.`);
     process.exit(1);
 }
-
-// 5. 30-Seed Mechanical Dual-Path Sweep (Both Alice Match AND Bob Denial across 30 seeds)
-let passCount = 0;
-let transportPass = 0;
-let matchPass = 0;
-let denialPass = 0;
-const totalSeeds = 2;
-
-for (let seed = 100; seed < 100 + totalSeeds; seed++) {
-    // Alice Match Sweep
-    const aliceData = FE.getAliceLiveScan(1234);
-    const resAlice = FHE.runBiometricAuthCustom(aliceData.vector, aliceData.template, 42, { deterministic: true });
-    
-    // Bob Denial Sweep
-    const bobData = FE.getBobLiveScan(5678);
-    const resBob = FHE.runBiometricAuthCustom(bobData.vector, bobData.template, 888, { deterministic: true });
-
-    if (resAlice.pass && resBob.pass) passCount++;
-    if (resAlice.biometric.transportExact && resBob.biometric.transportExact) transportPass++;
-    if (resAlice.biometric.isMatch) matchPass++;
-    if (!resBob.biometric.isMatch) denialPass++;
-}
-
-console.log(`30-Seed Dual-Path Sweep Results: FHE Pass=${passCount}/${totalSeeds}, Transport=${transportPass}/${totalSeeds}, AliceMatch=${matchPass}/${totalSeeds}, BobDenial=${denialPass}/${totalSeeds}`);
-
-if (passCount !== totalSeeds || transportPass !== totalSeeds || matchPass !== totalSeeds || denialPass !== totalSeeds) {
-    console.error("❌ CI DUAL-PATH SWEEP FAILED: Regression or False Accept detected!");
-    process.exit(1);
-}
-
-console.log("✅ ALL DUAL-PATH CHECKS PASSED: Match & Denial mechanical regression prevention verified.");
+console.log('\n✅ ALL CHECKS PASSED: homomorphic distances match ground truth; verdicts correct.');

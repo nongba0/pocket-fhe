@@ -34,13 +34,13 @@
                 <div class="metric-sub">k=16명 패킹 (n=512 coeffs)</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Latency per Value</div>
-                <div class="metric-value purple" id="val-latency">-- μs</div>
+                <div class="metric-label">Server Homomorphic Eval</div>
+                <div class="metric-value purple" id="val-latency">-- ms</div>
                 <div class="metric-sub" id="val-latency-sub">온디바이스 실측 대기 중</div>
             </div>
             <div class="metric-card">
-                <div class="metric-label">Recovery Accuracy</div>
-                <div class="metric-value gold" id="val-accuracy">-- %</div>
+                <div class="metric-label">동형 거리 = 평문 거리</div>
+                <div class="metric-value gold" id="val-accuracy">--</div>
                 <div class="metric-sub" id="val-status">READY</div>
             </div>
         </section>
@@ -141,7 +141,7 @@
             </div>
 
             <div class="chart-section">
-                <h3>슬롯별 암호문 복호화 무결성 (Slot Recovery Chart)</h3>
+                <h3>동형 평가 진행 상태 (Homomorphic Evaluation Progress)</h3>
                 <div class="slot-visualizer" id="slot-visualizer">
                     <!-- Dynamic slots rendered here -->
                 </div>

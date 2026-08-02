@@ -47,8 +47,9 @@ graph LR
 ### 📌 Milestone Timeline
 - [x] **Phase 1 — Core FHE Scheme Switching Glue**: Single-KSK Repack-free architecture, zero-dependency C++ (`fhe_core.hpp`) & JS engine, KSK key caching.
 - [x] **Phase 1.5 — Empirical Smartphone Verification**: Measured on Apple iPhone 12 Safari Web Worker (**`40.3 μs/value median`**, ~330 ms total).
-- [x] **Phase 2 — Official InsightFace MobileFaceNet ONNX Integration (COMPLETED & VERIFIED)**: Bundled official pretrained InsightFace MobileFaceNet ONNX model (`w600k_mbf.onnx`, 12.99 MB) in `demo/mobilefacenet.onnx` with ONNX Runtime Web WebGL/WASM acceleration. Empirical iPhone 12 measurements verified: **`42.5 ms` median ONNX AI inference** + **`337.5 ms` FHE scheme switching** = **`380 ms` Total End-to-End On-Device Execution Latency** (`100% ACCESS GRANTED` match success).
-- [ ] **Phase 3 — WebAssembly (WASM + SIMD) Acceleration**: Compiling `src/fhe_core.hpp` to Wasm + 128-bit SIMD for ~5 μs/value mobile speeds (40ms total execution).
+- [x] **Phase 2 — Official InsightFace MobileFaceNet ONNX Integration (COMPLETED & VERIFIED)**: Bundled official pretrained InsightFace MobileFaceNet ONNX model (`w600k_mbf.onnx`, 12.99 MB) in `demo/mobilefacenet.onnx` with ONNX Runtime Web WebGL/WASM acceleration. Empirical iPhone 12 measurements verified: **`42.5 ms` median ONNX AI inference** + **`337.5 ms` FHE glue** = **`380 ms`** on-device latency. *Note: this figure predates the Phase-2.5 rewrite and measured the **glue** stage; the homomorphic matching pipeline has not yet been re-measured on device.*
+- [x] **Phase 2.5 — Genuinely Homomorphic Matching**: The server now computes the squared distance on ciphertexts (reverse-multiply / Galois tensor identity) under strict Client/Server role isolation; CI asserts the decrypted distance equals the plaintext distance. Previously the difference was computed in plaintext and only transported through the glue.
+- [ ] **Phase 3 — TFHE Threshold PBS + WebAssembly (WASM + SIMD) Acceleration**: Replace the identity-stub threshold with a real Step PBS emitting an encrypted 1-bit verdict; compile `src/fhe_core.hpp` to Wasm + 128-bit SIMD.
 - [ ] **Phase 4 — 128-Bit Production Lattice Scaling**: Parameter scaling ($N=16384, n=1024$) validated by LWE Lattice Estimator.
 
 ---
@@ -58,7 +59,7 @@ graph LR
 Pocket-FHE enforces strict **Client vs. Server/Evaluator Role Isolation**:
 
 - **Client (On-Device)**: Holds secret key $s$, extracts feature embeddings via MobileFaceNet ONNX (plaintext), encrypts template $\text{Enc}(\mathbf{u})$ and live scan $\text{Enc}(\mathbf{v})$, and decrypts the final 1-bit match result.
-- **Server / FHE Evaluator**: Receives only ciphertexts $\text{Enc}(\mathbf{u}), \text{Enc}(\mathbf{v})$ and public evaluation keys ($ksk_{relin}, ksk_{rot}, ksk_{pbs}$). The evaluator **NEVER** touches secret key $s$ or plaintexts.
+- **Server / FHE Evaluator**: Receives only ciphertexts $\text{Enc}(\mathbf{u}), \text{Enc}(\mathbf{v})$ and two public gadget key-switching keys ($ksk_{conj}: \sigma_{-1}(s) \to s$, $ksk_{mix}: s \cdot \sigma_{-1}(s) \to s$). The evaluator **NEVER** touches secret key $s$ or plaintexts.
 
 ```mermaid
 graph TD
@@ -70,20 +71,24 @@ graph TD
 
     subgraph Server ["Server Evaluator (Zero Secret Key Access)"]
         C -->|1. Homomorphic Subtraction| D["Enc(d) = Enc(v) - Enc(u)"]
-        D -->|2. Homomorphic Square + Relin| E["Enc(d^2) via 1x Relin KSK"]
-        E -->|3. Slot Rotate-Sum| F["Enc(sqDist) in Slot 0 via 9x Galois Rotations"]
-        F -->|4. Sample Extract + 1-Bit TFHE PBS| H
+        D -->|"2. Automorphism σ₋₁ (no KS yet)"| E["Enc_σs(σ₋₁(d))"]
+        D --> F["3. Galois tensor product"]
+        E --> F
+        F -->|"4. 2x gadget KS (σs, s·σs → s)"| G2["Enc(Δ²·sqDist) in constant coeff"]
+        G2 -->|5. LWE Sample-Extract slot 0| H
     end
 ```
 
 ### 🔐 Server-Side Homomorphic Pipeline Details
 1. **Homomorphic Difference**: $\text{Enc}(\mathbf{d}) = \text{Enc}(\mathbf{v}) - \text{Enc}(\mathbf{u})$ (RLWE component-wise subtraction, 0 ms).
-2. **Homomorphic Component-Wise Square & Slot Rotate-Sum**:
-   - Component-wise square $\text{Enc}(\mathbf{d}) \otimes \text{Enc}(\mathbf{d})$ with 1x Relinearization KeySwitch ($s^2 \to s$).
-   - $\log_2(512) = 9$ Galois Automorphism rotations ($X^i \to X^{i \cdot 5^k} \pmod{X^N+1}$) + KSK to sum 512 dimensions into slot 0 ($\text{sqDist}$).
-3. **1-Bit TFHE Step PBS Threshold LUT**:
-   - LWE Sample-Extract from RLWE slot 0.
-   - 1x TFHE Step PBS LUT to output a 1-bit encrypted match decision $\text{Enc}_{\text{TFHE}}(b \in \{0, 1\})$.
+2. **Squared Distance via Reverse-Multiply (Galois Tensor)**:
+   - Values are coefficient-packed at stride $k$, so a naive $ct \times ct$ self-square is a **negacyclic convolution** whose constant term is $d_0^2 - \sum_{i+j=n} d_i d_{n-i}$ — *not* $\sum d_i^2$.
+   - Instead multiply $f$ by $\sigma_{-1}(f)$ (automorphism $X \to X^{-1} = X^{2N-1}$): the constant coefficient of $f \cdot \sigma_{-1}(f)$ is exactly $\sum_i f_i^2 = \Delta^2 \cdot \text{sqDist}$.
+   - Consequences: the sum lands in slot 0 directly, so **no rotate-sum and no 9 rotation keys are needed**; and because the automorphism is applied *before* the tensor product (with the $\sigma s$ / $s \cdot \sigma s$ components key-switched *after*), key-switching noise enters additively instead of being multiplied by the payload.
+   - Evaluation keys reduce to **two** gadget KSKs: $\sigma_{-1}(s) \to s$ and $s \cdot \sigma_{-1}(s) \to s$.
+3. **Threshold Decision** *(current status: identity stub)*:
+   - LWE Sample-Extract from the constant coefficient yields $\text{LWE}(\Delta^2 \cdot \text{sqDist})$.
+   - The threshold comparison is currently performed **by the client after decryption**. A TFHE Step PBS emitting an encrypted 1-bit verdict $\text{Enc}_{\text{TFHE}}(b)$ is **not yet implemented** (see roadmap Phase 3+). The server therefore learns nothing, but the client receives the distance rather than a single bit.
 
 ### 💡 Why Repack-Free?
 Classic scheme switching (TFHE $\to$ CKKS) requires heavy automorphism matrix-vector multiplications ("Repack") to pack multiple LWE samples into a CKKS ciphertext. Pocket-FHE's biometric matching pipeline runs in the **CKKS (distance evaluation) $\to$ TFHE (1-bit threshold)** direction, requiring only cheap **Sample-Extract + KeySwitch**, making the pipeline naturally **Repack-Free**!
@@ -91,6 +96,27 @@ Classic scheme switching (TFHE $\to$ CKKS) requires heavy automorphism matrix-ve
 ---
 
 ## 📊 Measured Verification Results
+
+### Homomorphic matching pipeline (`src/e2e_pipeline.cpp`, `demo/fhe_engine.js`)
+
+The load-bearing correctness assertion is that the **homomorphically computed
+squared distance matches the plaintext ground truth**, not merely that the
+verdict is right — a verdict-only test passes on garbage values that happen to
+straddle the threshold.
+
+| Check | Result |
+| :--- | :--- |
+| Decrypted sqDist vs. plaintext (C++, 20 independent key sets) | max abs. error **24** (genuine) / **83** (impostor) |
+| Decrypted sqDist vs. plaintext (JS, 8 seeds + 5 fixed cases) | max abs. error **≤ 97** |
+| Self-match ($\mathbf{d}=\mathbf{0}$) decrypts to | **≈ 0** (zero-point pinned) |
+| Genuine accept / impostor deny across sweep | **8/8 · 8/8** |
+| Server homomorphic evaluation (native x86, single-thread) | **≈ 35 ms** per 512-dim comparison |
+| Matching parameters | $N=8192,\ n=512,\ B_g=32,\ \ell=6,\ \Delta_{\text{match}}=32$ |
+
+> Representable range is bounded by the squared encoding: $\Delta^2 = 1024$, so
+> $\text{sqDist} < q / (2\Delta^2) \approx 4.87 \times 10^5$.
+
+### Repack-free glue (`src/arm_glue.cpp`, `src/test_homomorphic_computation.cpp`)
 
 - **Exact Recovery**: **8,192 / 8,192 slots PASS (100% Explicit Recovery)**
 - **Hardened Parameters**: $N=8192, n=512, k=16, B_g = 32 (2^5), \ell = 6$, $\sigma_{\text{LUT}} = 6.3 \times 10^{-7} \cdot q$
@@ -127,23 +153,30 @@ sequenceDiagram
     User->>User: 2. Encrypt Features with Secret Key s
     User->>Cloud: 3. Send Ciphertext Enc(v) to Untrusted Server
     Note over Cloud: Cloud stores Encrypted Database Enc(u_i)<br/>Cloud CANNOT see plaintext vectors
-    Cloud->>Cloud: 4. Compute Homomorphic Distance & Switch Scheme (Pocket-FHE)
-    Cloud->>User: 5. Return 1-bit Encrypted Match Result
-    User->>User: 6. Decrypt Match Result (Access Granted / Denied)
+    Cloud->>Cloud: 4. Compute Homomorphic Squared Distance (Pocket-FHE)
+    Cloud->>User: 5. Return Encrypted Distance (LWE)
+    User->>User: 6. Decrypt & Threshold (Access Granted / Denied)
 ```
 
 ### Threat Assumptions & Security Guarantees
 1. **Untrusted Storage & Server**: The template database $\mathbf{u}_i$ is stored fully encrypted ($\text{Enc}(\mathbf{u}_i)$) on untrusted cloud servers. The server process never sees unencrypted biometric features.
 2. **Zero Plaintext Visibility**: The matching engine performs homomorphic evaluation entirely on ciphertexts. Neither raw face templates nor intermediate distance vectors are exposed to the cloud server or network eavesdroppers.
+
+> **Current limitation:** because the threshold PBS is still a stub, the client
+> receives the encrypted **distance**, not a single encrypted bit. This does not
+> weaken the server's view (it still learns nothing), but it does mean the
+> "1-bit result" property is not yet realized end to end.
+
 ---
 
-## 📈 ROC Curve Calibration & Web Worker Execution Architecture
+## 📈 Decision Threshold & Web Worker Execution Architecture
 
-### 1. FAR/FRR Calibration & Decision Boundaries
-- **False Accept Rate (FAR)**: $\le 1.0 \times 10^{-5}$ (0.001%)
-- **False Reject Rate (FRR)**: $\le 1.0 \times 10^{-3}$ (0.1%)
-- **Calibrated Distance Threshold**: $\text{sqDist} \le 40,000$ (512-dim normalized feature embeddings)
-- **1-Bit TFHE Threshold Output**: $\text{LUT}(\text{sqDist} \le 40000) = 1$ ($\text{Match}$), else $0$ ($\text{Mismatch}$).
+### 1. Decision Boundary *(not yet calibrated on real data)*
+- **Demo threshold**: $\text{sqDist} \le 18{,}000$ (JS demo) / $5{,}000$ (C++ synthetic test).
+- These thresholds are chosen to separate the **synthetic** vectors used in this
+  repository. **No FAR/FRR figures are claimed**: a real operating point requires
+  a genuine face dataset (e.g. LFW) run through the bundled MobileFaceNet model,
+  which remains an open task (see [STATUS.md](STATUS.md)).
 
 ### 2. Multi-threaded Web Worker Offloading
 - Heavy FHE NTT and key-switching operations run inside a dedicated background thread (`fhe_worker.js`).
@@ -158,13 +191,16 @@ sequenceDiagram
 pocket-fhe/
 ├── STATUS.md               # Detailed Gate progression logs and revision history
 ├── src/
-│   ├── arm_glue.cpp        # Standalone C++ NTT Glue Module (mod p exact arithmetic)
-│   └── e2e_pipeline.cpp    # Full E2E Phase-Level Noise Model Pipeline
+│   ├── fhe_core.hpp        # Shared primitives: NTT, gadget KS, automorphism, RLWE/LWE
+│   ├── arm_glue.cpp        # Repack-free glue module (mod p exact arithmetic)
+│   ├── e2e_pipeline.cpp    # Homomorphic biometric matching, Client/Server isolated
+│   └── test_homomorphic_computation.cpp  # Glue + LUT/EvalMod noise-model recovery test
 ├── demo/
 │   ├── index.html          # Interactive Mobile WebApp Dashboard
 │   ├── style.css           # Glassmorphism Dark Mode Styling
 │   ├── app.js              # UI Visualizer Controller
-│   └── fhe_engine.js       # Real JavaScript FHE Engine (mulmod 2^15 precision)
+│   ├── fhe_engine.js       # JS FHE engine (mulmod 2^15 precision), mirrors e2e_pipeline.cpp
+│   └── test_node.js        # CI suite — asserts homomorphic distance == plaintext distance
 ├── arm-build/
 │   └── README.md           # ARM aarch64 cross-compilation guide
 └── README.md

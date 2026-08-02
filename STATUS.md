@@ -17,6 +17,34 @@
 
 ## 히스토리 타임라인
 
+- **2026-08-03: Phase 2.5 — 매칭 파이프라인 실제 동형화 (리뷰 반영 정정)**
+  - **적발된 문제 (정정 대상)**:
+    1. 데모/`e2e_pipeline.cpp`가 차분 `d = live − template`을 **평문으로** 계산한 뒤
+       암호화해 수송만 했음 — README의 threat model(서버가 동형 거리 계산)과 코드가 불일치.
+    2. `homomorphic_square`가 계수 패킹 위에서 self-square를 수행 → 이는 **negacyclic
+       convolution**이라 상수항이 $\sum d_i^2$가 아니라 $d_0^2 - \sum_{i+j=n} d_i d_{n-i}$.
+       게다가 C++ 쪽은 relinearization도 누락($a^2 s^2$ 항 폐기), JS는 relin 사용 —
+       두 구현이 서로 다른 상태였음.
+    3. 테스트가 버그를 가림: Bob의 실제 sqDist=1280 < threshold 5000이라 *올바른* 구현이면
+       Bob도 GRANT여야 했음. "ALL CHECKS PASSED"는 쓰레기값이 우연히 갈라진 결과.
+  - **수정**: 제곱거리를 **reverse-multiply(Galois tensor) 항등식**으로 교체.
+    $f \cdot \sigma_{-1}(f)$의 상수항이 정확히 $\sum f_i^2$. automorphism을 곱 **이전**에
+    적용하고 $\sigma s$, $s\sigma s$ 성분을 곱 **이후**에 KS → KS 노이즈가 페이로드에
+    곱해지지 않고 가산으로만 들어감.
+    - 부수 효과: rotate-sum(9회 회전) **전면 불필요**, rotation KSK 9개 삭제.
+      평가키가 gadget KSK 2개($\sigma_{-1}(s)\to s$, $s\sigma_{-1}(s)\to s$)로 축소.
+  - **스케일 정정**: 매칭은 제곱 연산이라 페이로드가 $\Delta^2 \cdot \text{sqDist}$로 커짐.
+    $\Delta_{\text{match}}=32$ 분리 도입($\Delta^2=1024$, 표현범위 $\text{sqDist} < q/2\Delta^2 \approx 4.87\times10^5$).
+    glue 경로의 $\Delta_{\text{glue}}=122333$은 원복 — 직전 커밋에서 $\Delta$를 64로 바꾸는 바람에
+    `test_homomorphic_computation`(8192중 89슬롯만 복구)과 `biometric_pipeline`이 깨져 있었음.
+  - **테스트 강화**: 판정 일치가 아니라 **복호된 동형 거리 == 평문 거리**(±200)를 assert.
+    self-match(d=0)로 영점 고정, impostor를 threshold를 실제로 넘는 벡터로 교체.
+  - **실측**: C++ 20개 독립 키셋 max|err| = 24(genuine)/83(impostor), 판정 20/20 정확.
+    JS 8시드 + 고정 5케이스 max|err| ≤ 97, grants 8/8 · denials 8/8.
+    서버 동형 평가 ≈ 35 ms/비교 (native x86 단일 스레드).
+  - **미해결로 명시**: threshold PBS는 여전히 identity 스텁 — 클라이언트가 복호 후 비교.
+    "암호화된 1비트 출력"은 Phase 3 과제. README의 FAR/FRR 수치는 실데이터 미검증이라 삭제.
+
 - **2026-07-30: 폴더 생성 및 프로젝트 개시**
 - **2026-07-30: G1 통과**
   - aarch64 cross compiler + QEMU 실행으로 $N=65536, n=2048, k=32$ 파라미터에서 PASS ($\text{max\_err}=157781 < \Delta/2=974848$).

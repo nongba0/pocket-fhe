@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const db = FaceEncoder.getDatabase();
 
         log(`[1:N 검색] ${db.length}명의 차분 벡터를 k=16 배치 암호문에 실어 한 번의 파이프라인으로 동시 처리 (배치 = 갤러리)`, 'highlight');
-        log(`[TFHE Threshold Step LUT] FAR/FRR 캘리브레이션 1비트 비교 판정 출력`, 'info');
+        log(`[안내] 임계값 비교는 클라이언트가 복호 후 수행 — 암호화된 1비트 출력(TFHE PBS)은 미구현`, 'info');
 
         btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true; btnSearch1N.disabled = true;
         statusBadge.textContent = 'Executing 1:N Search...';
@@ -150,16 +150,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const processResult = (result, totalMs) => {
             const multi = result.multiBiometric;
-            log(`[1:N 복호 결과] TFHE Threshold Step LUT 1비트 비교 판정 (평문 대조: ${multi.allTransportExact ? '전원 정확 수송 ✓' : '불일치 ✗'}):`, 'info');
+            log(`[1:N 동형 검색 결과] 서버가 암호문 상태로 계산한 제곱거리 (평문 대조: ${multi.allTransportExact ? '전원 일치 ✓' : '불일치 ✗'}):`, 'info');
             multi.allResults.forEach(r => {
-                log(`  - ${r.name}: 제곱거리=${r.sqDist} (유사도: ${r.simScore}%)`, r.sqDist <= 40000 ? 'success' : 'info');
+                log(`  - ${r.name}: 동형 제곱거리=${r.sqDist} / 평문 ${r.sqDistPlain} (유사도: ${r.simScore}%)`, r.transportExact ? 'success' : 'error');
             });
             if (multi.truncated) log(`[안내] 데모는 1배치(k=16명)까지 동시 처리 — 초과 사용자는 제외됨`, 'info');
 
             log(`[1:N 최종 검색 결과] ${multi.status}`, multi.isMatch ? 'success' : 'error');
 
-            log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
-                `= ${result.usPerValue.toFixed(1)} µs/값`, 'success');
+            log(`[Stage 2] 서버 동형 평가 실측 (${multi.totalUsers}명 × [diff + σ₋₁ + tensor + 2×KS]): ${result.glueMs.toFixed(1)} ms`, 'success');
 
             slots.forEach((s, idx) => {
                 setTimeout(() => {
@@ -202,21 +201,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const encoderType = FaceEncoder.hasONNXSession() ? 'MobileFaceNet ONNX 딥러닝 세션 구동 (12.99MB 모델)' : '로컬 L2-정규화 폴백 인코더';
         log(`[라이브 카메라 스캔] 카메라 프레임에서 512차원 특징점 추출 완료 (${encoderType})`, 'highlight');
-        log(`[Pocket-FHE] 특징점 차분 벡터를 RLWE 암호문 실페이로드로 인코딩 — 스위치(glue)는 실연산`, 'info');
+        log(`[Pocket-FHE] 두 특징 벡터를 각각 RLWE로 암호화 — 차분·제곱거리는 서버가 암호문 상태로 계산`, 'info');
 
         const slots = slotVisualizer.querySelectorAll('.slot');
         slots.forEach(s => s.className = 'slot');
 
         const processResult = (result, totalMs) => {
             const bio = result.biometric;
-            log(`[복호 판정] 복구된 512개 차분값에서 제곱거리 = ${bio.sqDist} (평문 대조: ${bio.transportExact ? '512/512 정확 수송 ✓' : '불일치 ✗'})`, 'highlight');
-            log(`[TFHE Threshold Step LUT] FAR<0.001%, FRR<0.1% ROC 캘리브레이션 1비트 출력`, 'info');
+            log(`[동형 판정] 서버가 암호문 상태로 계산한 제곱거리 = ${bio.sqDist} (평문 대조 ${bio.sqDistPlain}: ${bio.transportExact ? '일치 ✓' : '불일치 ✗'})`, 'highlight');
+            log(`[임계값 판정] 현재는 클라이언트가 복호 후 비교 — 암호화된 1비트 출력(TFHE PBS)은 미구현`, 'info');
             log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
 
-            log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
-                `= ${result.usPerValue.toFixed(1)} µs/값`, 'success');
-            log(`[검증] 정확 복구: ${result.exact} / ${result.total} 슬롯` +
-                (result.pass ? ' (PASS)' : ' (FAIL)'), result.pass ? 'success' : 'error');
+            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ + tensor + 2×KS): ${result.glueMs.toFixed(1)} ms`, 'success');
+            log(`[검증] 동형 거리 vs 평문 거리 일치 여부: ` +
+                (result.pass ? 'PASS' : 'FAIL'), result.pass ? 'success' : 'error');
 
             slots.forEach((s, idx) => {
                 setTimeout(() => {
@@ -250,21 +248,20 @@ document.addEventListener('DOMContentLoaded', () => {
 
         const personData = targetPerson === 'alice' ? FaceEncoder.getAliceLiveScan(runSeed) : FaceEncoder.getBobLiveScan(runSeed);
         log(`[Face ID 스캔] ${personData.name} 512차원 특징점 벡터 추출 완료 (합성 샘플)`, 'highlight');
-        log(`[Pocket-FHE] 특징점 차분 벡터를 RLWE 암호문 실페이로드로 인코딩 — 스위치(glue)는 실연산`, 'info');
+        log(`[Pocket-FHE] 두 특징 벡터를 각각 RLWE로 암호화 — 차분·제곱거리는 서버가 암호문 상태로 계산`, 'info');
 
         const slots = slotVisualizer.querySelectorAll('.slot');
         slots.forEach(s => s.className = 'slot');
 
         const processResult = (result, totalMs) => {
             const bio = result.biometric;
-            log(`[복호 판정] 복구된 512개 차분값에서 제곱거리 = ${bio.sqDist} (평문 대조: ${bio.transportExact ? '512/512 정확 수송 ✓' : '불일치 ✗'})`, 'highlight');
-            log(`[TFHE Threshold Step LUT] FAR<0.001%, FRR<0.1% 캘리브레이션 1비트 출력`, 'info');
+            log(`[동형 판정] 서버가 암호문 상태로 계산한 제곱거리 = ${bio.sqDist} (평문 대조 ${bio.sqDistPlain}: ${bio.transportExact ? '일치 ✓' : '불일치 ✗'})`, 'highlight');
+            log(`[임계값 판정] 현재는 클라이언트가 복호 후 비교 — 암호화된 1비트 출력(TFHE PBS)은 미구현`, 'info');
             log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
 
-            log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
-                `= ${result.usPerValue.toFixed(1)} µs/값`, 'success');
-            log(`[검증] 정확 복구: ${result.exact} / ${result.total} 슬롯` +
-                (result.pass ? ' (PASS)' : ' (FAIL)'), result.pass ? 'success' : 'error');
+            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ + tensor + 2×KS): ${result.glueMs.toFixed(1)} ms`, 'success');
+            log(`[검증] 동형 거리 vs 평문 거리 일치 여부: ` +
+                (result.pass ? 'PASS' : 'FAIL'), result.pass ? 'success' : 'error');
 
             slots.forEach((s, idx) => {
                 setTimeout(() => {
@@ -310,11 +307,11 @@ document.addEventListener('DOMContentLoaded', () => {
         slots.forEach(s => s.className = 'slot');
 
         const processResult = (result, totalMs) => {
-            log(`[Stage 2] Glue 실측 (embed + merge + gadget KS): ${result.glueMs.toFixed(1)} ms ` +
-                `= ${result.usPerValue.toFixed(1)} µs/값`, 'success');
-            log(`[Stage 3] phase/EvalMod: 노이즈 시뮬레이션 (동형 실행 아님 — ideal-sine 모델)`, 'info');
-            log(`[검증] 정확 복구: ${result.exact} / ${result.total} 슬롯` +
-                (result.pass ? ' (PASS)' : ' (FAIL)'), result.pass ? 'success' : 'error');
+            log(`[동형 판정] 서버가 암호문 상태로 계산한 제곱거리 = ${result.biometric.sqDist} ` +
+                `(평문 대조 ${result.biometric.sqDistPlain}: ${result.biometric.transportExact ? '일치 ✓' : '불일치 ✗'})`, 'highlight');
+            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ + tensor + 2×KS): ${result.glueMs.toFixed(1)} ms`, 'success');
+            log(`[검증] 동형 거리 vs 평문 거리 일치 여부: ` +
+                (result.pass ? 'PASS' : 'FAIL'), result.pass ? 'success' : 'error');
 
             slots.forEach((s, idx) => {
                 setTimeout(() => {
@@ -341,19 +338,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function finalize(result, totalMs) {
-        const accuracy = (100 * result.exact / result.total);
-        valLatency.textContent = `${result.usPerValue.toFixed(1)} μs`;
-        valLatencySub.textContent =
-            `Glue ${result.glueMs.toFixed(0)} ms / ${result.total} slots (JS, 이 기기 실측)`;
-        valAccuracy.textContent = `${accuracy.toFixed(accuracy === 100 ? 0 : 2)} %`;
-        
+        valLatency.textContent = `${result.glueMs.toFixed(0)} ms`;
+        valLatencySub.textContent = `서버 동형 평가 1회 (JS, 이 기기 실측)`;
+        valAccuracy.textContent = result.pass ? '일치' : '불일치';
+
         let statusStr = 'VERIFIED PASS';
         if (result.multiBiometric) {
             statusStr = result.multiBiometric.isMatch ? `MATCH: ${result.multiBiometric.bestUser}` : 'NO MATCH';
         } else if (result.biometric) {
             statusStr = result.biometric.isMatch ? 'MATCH SUCCESS' : 'MATCH FAIL';
         } else {
-            statusStr = result.pass ? 'VERIFIED PASS' : `${result.exact}/${result.total}`;
+            statusStr = result.pass ? 'VERIFIED PASS' : 'MISMATCH';
         }
         valStatus.textContent = statusStr;
 

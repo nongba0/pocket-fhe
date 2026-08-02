@@ -19,10 +19,20 @@ static const int k = N / n; // 16
 static const int Bg = 32; // 2^5
 static const int ell = 6;
 static const int hS = 64; // sparse ternary weight
-static const int64_t A_amp = 64;
+// Two encoding scales for two distinct pipelines:
+//  - A_amp   (Δ_glue, large): glue/transport demos recover m = phase/Δ, need Δ >> σ_lut.
+//  - A_match (Δ_match, small): matching pipeline squares ciphertexts, so the
+//    payload scales as Δ²·sqDist which must stay below q/2.
+//    Δ_match=32 → Δ²=1024, representable sqDist < q/(2·1024) ≈ 4.87e5.
+static const int64_t A_amp = q / (32 * 255); // 122333, rho = 2^-5 (glue/transport)
+static const int64_t A_match = 32;           // matching pipeline (squared encoding)
 static const double PI = 3.14159265358979323846;
-static const double sigma_lut = 6.3e-7 * q; // B-3 recalibrated
+static const double sigma_lut = 6.3e-7 * q; // B-3 recalibrated (glue/LUT noise model)
 static const double sigma_ks = 1.0;
+// Fresh-encryption noise for the matching pipeline. Kept small so that the
+// ct×ct product noise (Σe_i² bias ≈ N·σ² and 2ΔΣd_ie_i cross term) stays far
+// below Δ²=1024 per sqDist unit. Demo parameter — no security claimed.
+static const double sigma_enc = 1.0;
 static const double sigma_eval = q * std::pow(2.0, -25.0);
 
 inline int64_t mod(int64_t x) {
@@ -218,6 +228,22 @@ inline RLWECiphertext keyswitch_poly(const std::vector<int64_t>& poly, const std
             res.a[i] = (res.a[i] + da[i]) % q;
             res.b[i] = (res.b[i] + db[i]) % q;
         }
+    }
+    return res;
+}
+
+// Homomorphic automorphism X -> X^g: apply sigma_g to both components, then
+// key-switch sigma_g(a) back to the base key s using a KSK that encrypts
+// Bg^t * sigma_g(s) under s (b = -a*s + Bg^t*sigma_g(s) + e).
+// Resulting phase: b' - a'*s = sigma_g(b - a*s) - e'.
+inline RLWECiphertext rlwe_automorphism(const RLWECiphertext& ct, int g, const std::vector<KSKPair>& ksk, const NTTRoots& roots) {
+    std::vector<int64_t> ra = apply_automorphism(ct.a, g);
+    std::vector<int64_t> rb = apply_automorphism(ct.b, g);
+    RLWECiphertext ks = keyswitch_poly(ra, ksk, roots);
+    RLWECiphertext res;
+    for (int i = 0; i < N; ++i) {
+        res.a[i] = ks.a[i];
+        res.b[i] = mod(rb[i] - ks.b[i]);
     }
     return res;
 }
