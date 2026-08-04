@@ -61,7 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const t0 = performance.now();
         FHE.initKeys();
         const initMs = performance.now() - t0;
-        log(`[KSK Key Caching] 0.36GB KSK 스위칭 키 사전 생성 및 캐싱 완료 (${initMs.toFixed(0)} ms) — 반응 속도 단축!`, 'success');
+        log(`[Evaluation Key Caching] 73.8MB 평가키(BSK 32MB + LWE-KSK 40MB + Gadget 1.5MB) 사전 생성 및 캐싱 완료 (${initMs.toFixed(0)} ms)`, 'success');
         FaceEncoder.initMobileFaceNetONNX('mobilefacenet.onnx', log);
     }, 100);
 

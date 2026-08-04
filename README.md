@@ -4,8 +4,8 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/Platform-iOS%20%7C%20Android%20%7C%20ARM64%20%7C%20Wasm-brightgreen.svg)]()
-[![RAM Budget](https://img.shields.io/badge/Peak%20RAM-6.2%20--%2020.4%20MB-purple.svg)]()
-[![Key Budget](https://img.shields.io/badge/Key%20Budget-0.36%20GB-orange.svg)]()
+[![RAM Budget](https://img.shields.io/badge/Peak%20RAM-193%20MB%20%28Full%20E2E%29%20%7C%2020.4%20MB%20%28Glue%29-purple.svg)]()
+[![Key Footprint](https://img.shields.io/badge/Key%20Footprint-73.8%20MB%20%28Full%20E2E%29%20%7C%201.5%20MB%20%28Glue%29-orange.svg)]()
 [![Status](https://img.shields.io/badge/History-STATUS.md-green.svg)](STATUS.md)
 
 
@@ -21,13 +21,13 @@ Standard FHE scheme switching (e.g., OpenFHE CKKStoFHEW / FHEWtoCKKS baseline) r
 
 ### Verified Benchmark & Baseline Comparison
 
-| Metric | OpenFHE A2 Baseline *(internal measurement, 2026-07; log available on request)* | **Pocket-FHE (Ours)** *(Verified)* |
-|---|---|---|
-| **Repack Key Footprint** | **1,653.1 MB** (Automorphism keys) | **0.36 GB (~360 MB)** (Single-KSK) 🚀 |
-| **Peak Execution RAM** | ~3.8 GB – 13.8 GB (Scheme Dependent) | **6.2 MB – 20.4 MB** *(Measured Peak RSS)* ⚡ |
-| **Repack Latency** | **37,707 ms** (`fhew2ckks_repack`, single-thread CPU) | **0 ms** *(structurally removed)* |
-| **Glue Latency (Native)** | High | **3.0 – 3.7 μs / value** *@ N=8192, Bg=32, ell=6* |
-| **Target Hardware** | Server CPU / GPU | **Smartphone ARM / Wasm** |
+| Metric | OpenFHE A2 Baseline *(internal measurement, 2026-07)* | **Pocket-FHE Phase 1 (Glue Only)** *(Verified)* | **Pocket-FHE Phase 3 (Full E2E Matching + PBS)** *(Verified)* |
+|---|---|---|---|
+| **Evaluation Key Footprint** | **1,653.1 MB** (Automorphism keys) | **1.5 MB** (Single-KSK) 🚀 | **73.8 MB** (BSK 32 MB + LWE-KSK 40 MB + Gadget 1.5 MB) 🛡️ |
+| **Peak Execution RAM** | ~3.8 GB – 13.8 GB (Scheme Dependent) | **6.2 MB – 20.4 MB** *(Measured Peak RSS)* ⚡ | **193 MB** *(Measured Peak RSS)* ⚡ |
+| **Server Evaluation Latency** | **37,707 ms** (`fhew2ckks_repack`, single-thread CPU) | **3.0 – 3.7 μs / value** *@ N=8192* | **1,298 ms** (Native C++) / **~4.4 s** (Node.js / Browser JS) |
+| **Homomorphic Result** | Plaintext transport | Scheme Switching Glue | **1-Bit Encrypted Verdict** (Zero-Knowledge) |
+| **Target Hardware** | Server CPU / GPU | Smartphone ARM / Wasm | Smartphone ARM / Wasm |
 
 *Note: History log and gate progress details are tracked in [STATUS.md](STATUS.md).*
 

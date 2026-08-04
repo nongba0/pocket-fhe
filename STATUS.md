@@ -41,9 +41,12 @@
       mod-switch 후 $[0, N_{acc})$에 들어가므로 negacyclic 절반은 사용하지 않음(padding bit).
     - JS: LWE-KSK를 객체 4만 개 대신 평탄 `Float64Array` 하나로 저장(OOM 해소), 세션 키
       캐시 도입으로 keygen 1회만 수행.
-  - **실측**: 서버 평가 **≈ 0.63 s** (native x86, sqDist 35 ms + LWE-KS + 128 CMux),
+  - **실측**: 서버 평가 **≈ 1.3 s** (native C++, sqDist + LWE-KS + 128 CMux),
     JS ≈ 4.5 s. 경계 스윕에서 전이점 ~4600, mod-switch jitter ~550 sqDist(1σ) →
     임계값은 **±1700 범위에서만 확정적**임을 측정해 문서화(가정 아님).
+  - **자원 실측 정합화 (2026-08-04)**:
+    - **Peak RAM (Peak RSS)**: Phase 1 Glue 전용 = **6.2–20.4 MB** / Phase 3 Full E2E (매칭 + PBS) = **193 MB**
+    - **평가키 용량**: 총 **73.8 MB** (BSK 32 MB + LWE-KSK 40 MB + Gadget KSK 1.5 MB)
   - **회귀 방지 장치 2종**:
     1. *구조 가드*: 평가키가 `{bsk, ksk}`, BSK 엔트리가 `{rowA, rowB}` 외의 필드를
        노출하면 CI 실패 — 1차 시도의 `{index, sign}` 유출을 직접 겨냥.

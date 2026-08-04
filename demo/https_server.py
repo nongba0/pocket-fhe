@@ -21,6 +21,18 @@ os.chdir(dir_path)
 cert_path = os.path.join(dir_path, 'cert.pem')
 key_path = os.path.join(dir_path, 'key.pem')
 
+if not os.path.exists(cert_path) or not os.path.exists(key_path):
+    print("SSL certificate not found. Generating temporary self-signed cert.pem / key.pem...")
+    import subprocess
+    try:
+        subprocess.run([
+            "openssl", "req", "-x509", "-newkey", "rsa:2048",
+            "-keyout", key_path, "-out", cert_path, "-days", "365",
+            "-nodes", "-subj", "/CN=localhost"
+        ], check=True)
+    except Exception as err:
+        print(f"Warning: Could not auto-generate SSL cert via openssl ({err}). Please provide cert.pem and key.pem manually.")
+
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain(certfile=cert_path, keyfile=key_path)
 httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
