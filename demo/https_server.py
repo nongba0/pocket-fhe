@@ -33,9 +33,22 @@ if not os.path.exists(cert_path) or not os.path.exists(key_path):
     except Exception as err:
         print(f"Warning: Could not auto-generate SSL cert via openssl ({err}). Please provide cert.pem and key.pem manually.")
 
+class CustomHandler(http.server.SimpleHTTPRequestHandler):
+    def translate_path(self, path):
+        # Remove trailing query strings
+        path_only = path.split('?')[0]
+        # Allow /demo/ prefix or root /
+        if path_only.startswith('/demo/'):
+            path_only = path_only[5:]
+        if path_only == '/' or path_only == '':
+            path_only = '/index.html'
+        return super().translate_path(path_only)
+
+httpd = http.server.HTTPServer((bind_address, port), CustomHandler)
+
 context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain(certfile=cert_path, keyfile=key_path)
 httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-print(f"Serving HTTPS on {bind_address}:{port}...")
+print(f"Serving HTTPS on https://localhost:{port}/ (or https://127.0.0.1:{port}/)...")
 httpd.serve_forever()
