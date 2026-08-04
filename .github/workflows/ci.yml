@@ -33,7 +33,7 @@ jobs:
           ./src/biometric_pipeline_native
 
   node-seed-sweep:
-    name: Node.js 30-Seed FHE Sweep & TransportExact Mechanical Enforcement
+    name: Node.js Sweep — homomorphic distance must equal plaintext distance
     runs-on: ubuntu-latest
 
     steps:
@@ -45,5 +45,5 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Run 30-Seed Mechanical Verification Sweep
+      - name: Run Correctness Verification Sweep
         run: node demo/test_node.js

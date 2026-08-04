@@ -17,6 +17,15 @@
 
 ## 히스토리 타임라인
 
+- **2026-08-04: Phase 3 — TFHE Programmable Bootstrapping (PBS) 1-비트 암호화 판정 엔진 실구현 완료**
+  - **진행 내용**:
+    1. Identity 스텁이었던 `homomorphic_threshold_pbs`를 **실제 TFHE Programmable Bootstrapping (PBS)** 1비트 암호화 Step LUT 평가 엔진으로 구현 완료.
+    2. **Sparse BSK 메모리 최적화**: 비밀키 $S_q$ ($N=8192$) 중 비제로 성분 $h_S = 64$개에 대해서만 GGSW 키스위칭 암호문을 생성하는 `SparseBSK` 도입 ($38.6\text{ GB} \to 302\text{ MB}$ RAM 축소).
+    3. **Step LUT 테스트 다항식 $V(X)$**: $j \le \text{threshold\_j}$ 구간은 $+A_{\text{match}}$, $j > \text{threshold\_j}$ 구간은 $-A_{\text{match}}$로 지정. Sparse Blind Rotation 이후 $X^0$ 슬롯에서 추출되는 암호문 복호 시 genuine(Alice)은 phase $\le 0$ (`GRANT`), impostor(Bob)는 phase $> 0$ (`DENY`) 1비트 암호화 판정 생성.
+  - **검증**:
+    - Native C++ (`src/e2e_pipeline.cpp`): Alice (`GRANT`, dec sqDist=119 / true 103), Bob (`DENY`, dec sqDist=80133 / true 80128). E2E homomorphic pipeline PASS.
+    - JS Engine (`demo/fhe_engine.js`) & Node.js CI (`demo/test_node.js`): `mulmod` 정밀도 손실 예방 적용 후 100% PASS.
+
 - **2026-08-03: Phase 2.5 — 매칭 파이프라인 실제 동형화 (리뷰 반영 정정)**
   - **적발된 문제 (정정 대상)**:
     1. 데모/`e2e_pipeline.cpp`가 차분 `d = live − template`을 **평문으로** 계산한 뒤

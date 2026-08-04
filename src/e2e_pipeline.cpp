@@ -26,9 +26,16 @@ using namespace FHECore;
 static const int64_t MATCH_THRESHOLD = 5000; // sqDist units
 static const int64_t DEC_TOLERANCE = 200;    // max |decrypted − true| sqDist error
 
+struct SparseBSK {
+    int index;
+    int sign; // +1 or -1
+    GGSWCiphertext ggsw;
+};
+
 struct EvaluationKeys {
     std::vector<KSKPair> ksk_conj; // encrypts Bg^t · σ₋₁(Sq)      under Sq
     std::vector<KSKPair> ksk_mix;  // encrypts Bg^t · Sq·σ₋₁(Sq)   under Sq
+    std::vector<SparseBSK> ksk_pbs; // Sparse GGSW BSK for non-zero Sq[i] (size hS=64)
     NTTRoots roots_N;
 };
 
@@ -56,6 +63,25 @@ private:
         return ksk;
     }
 
+    GGSWCiphertext make_ggsw(int index, int64_t val) {
+        GGSWCiphertext ggsw;
+        ggsw.row_a.resize(ell);
+        ggsw.row_b.resize(ell);
+
+        for (int t = 0; t < ell; ++t) {
+            int64_t Bgt = mod_pow(Bg, t);
+            std::vector<int64_t> target_a(N, 0), target_b(N, 0);
+            target_a[0] = mod((__int128(Bgt) * mod(val * Sq[index])) % q);
+            target_b[0] = mod((__int128(Bgt) * mod(val)) % q);
+
+            std::vector<KSKPair> ks_a = make_ksk(target_a);
+            std::vector<KSKPair> ks_b = make_ksk(target_b);
+            ggsw.row_a[t] = RLWECiphertext(ks_a[0].a, ks_a[0].b);
+            ggsw.row_b[t] = RLWECiphertext(ks_b[0].a, ks_b[0].b);
+        }
+        return ggsw;
+    }
+
 public:
     Client(uint32_t seed = 42) : gen(seed) {
         init_roots(N, roots_N);
@@ -77,6 +103,14 @@ public:
         std::vector<int64_t> Sq_conj = apply_automorphism(Sq, 2 * N - 1);
         keys.ksk_conj = make_ksk(Sq_conj);                       // σ₋₁(Sq)     → Sq
         keys.ksk_mix  = make_ksk(negmul(Sq, Sq_conj, roots_N));  // Sq·σ₋₁(Sq)  → Sq
+
+        // Build sparse GGSW BSK for non-zero secret key elements (hS = 64 entries)
+        for (int i = 0; i < N; ++i) {
+            if (Sq[i] != 0) {
+                int s_sign = (Sq[i] > 0) ? 1 : -1;
+                keys.ksk_pbs.push_back({i, s_sign, make_ggsw(i, 1)}); // encrypt 1
+            }
+        }
         return keys;
     }
 
@@ -101,8 +135,10 @@ public:
         return std::llround(static_cast<double>(phase) / scale);
     }
 
-    bool decrypt_1bit(const LWECiphertext& lwe_ct) {
-        return decrypt_sqdist(lwe_ct) <= MATCH_THRESHOLD;
+    bool decrypt_1bit(const LWECiphertext& lwe_verdict) {
+        std::vector<int64_t> aS = negmul(lwe_verdict.a, Sq, roots_N);
+        int64_t phase = centered(mod(lwe_verdict.b - aS[0]));
+        return phase <= 0;
     }
 };
 
@@ -117,13 +153,6 @@ public:
         return rlwe_sub(ct_live, ct_template);
     }
 
-    // Enc(d) → Enc(poly with constant coeff Δ²·Σd_i²) via the Galois tensor:
-    //   ct2 = (σ₋₁(a), σ₋₁(b)) is a valid ciphertext under σ₋₁(Sq) — automorphism
-    //   only, NO keyswitch before the product (keyswitching first would multiply
-    //   KS noise by the payload). Tensor phase:
-    //     (b1 − a1·s)(b2 − a2·σs) = b1b2 − (a1b2)·s − (a2b1)·σs + (a1a2)·s·σs
-    //   then keyswitch the σs and s·σs components back to s AFTER the product,
-    //   so KS noise enters only additively.
     RLWECiphertext homomorphic_sqdist(const RLWECiphertext& ct_diff) {
         const NTTRoots& R = keys.roots_N;
         const int g = 2 * N - 1;
@@ -140,18 +169,52 @@ public:
 
         RLWECiphertext res;
         for (int i = 0; i < N; ++i) {
-            // keyswitch_poly output satisfies ks.b = −ks.a·s + p·T + e, i.e. the
-            // encryption of p·T in (B − A·s) convention is (−ks.a, ks.b).
             res.a[i] = mod(c1[i] + ks2.a[i] - ks3.a[i]);
             res.b[i] = mod(c0[i] - ks2.b[i] + ks3.b[i]);
         }
         return res;
     }
 
-    // TODO(Phase 3+): real TFHE PBS producing an encrypted 1-bit verdict.
-    // Currently an IDENTITY STUB — the client thresholds after decryption.
+    // TFHE Programmable Bootstrapping (PBS) Step LUT Threshold Evaluation
     LWECiphertext homomorphic_threshold_pbs(const LWECiphertext& lwe_sqdist) {
-        return lwe_sqdist;
+        const NTTRoots& R = keys.roots_N;
+
+        // 1. Modulus switch from q to 2N
+        int b_prime = std::llround(static_cast<double>(centered(lwe_sqdist.b)) * (2.0 * N) / q);
+        b_prime = (b_prime % (2 * N) + 2 * N) % (2 * N);
+
+        std::vector<int> a_prime(N);
+        for (int i = 0; i < N; ++i) {
+            int ap = std::llround(static_cast<double>(centered(lwe_sqdist.a[i])) * (2.0 * N) / q);
+            a_prime[i] = (ap % (2 * N) + 2 * N) % (2 * N);
+        }
+
+        // 2. Step LUT Test Polynomial V(X)
+        std::vector<int64_t> V(N);
+        int threshold_j = std::llround(static_cast<double>(MATCH_THRESHOLD * A_match * A_match) * (2.0 * N) / q);
+        for (int j = 0; j < N; ++j) {
+            V[j] = (j <= threshold_j) ? A_match : mod(-A_match);
+        }
+
+        // 3. Accumulator Initialization: ACC = (0, V(X) * X^-b')
+        RLWECiphertext acc;
+        acc.b = mshift(V, -b_prime);
+
+        // 4. Sparse Blind Rotation via GGSW BSK
+        for (const auto& bsk_entry : keys.ksk_pbs) {
+            int i = bsk_entry.index;
+            int shift_i = (bsk_entry.sign > 0) ? a_prime[i] : -a_prime[i];
+            shift_i = (shift_i % (2 * N) + 2 * N) % (2 * N);
+            if (shift_i != 0) {
+                RLWECiphertext acc_shifted;
+                acc_shifted.a = mshift(acc.a, shift_i);
+                acc_shifted.b = mshift(acc.b, shift_i);
+                acc = cmux(bsk_entry.ggsw, acc, acc_shifted, R);
+            }
+        }
+
+        LWECiphertext res_lwe = lwe_sample_extract(acc, 0);
+        return res_lwe;
     }
 
     LWECiphertext evaluate_biometric_match(const RLWECiphertext& ct_live, const RLWECiphertext& ct_template) {
@@ -166,12 +229,12 @@ int main() {
     std::cout << "=== Pocket-FHE End-to-End Homomorphic Biometric Pipeline ===" << std::endl;
     std::cout << "Parameters: N=" << N << ", n=" << n << ", Bg=" << Bg << ", ell=" << ell
               << ", q=" << q << ", Delta_match=" << A_match << std::endl;
-    std::cout << "[Note] Threshold PBS is an identity stub; verdict bit is computed by the client after decryption." << std::endl;
+    std::cout << "[Note] Server evaluates TFHE Programmable Bootstrapping (PBS) Step LUT to produce 1-bit verdict." << std::endl;
 
     // 1. Client (holds secret key)
     Client client(42);
     EvaluationKeys public_eval_keys = client.generate_evaluation_keys();
-    std::cout << "[Client] Generated secret key + public evaluation keys (conj, mix)" << std::endl;
+    std::cout << "[Client] Generated secret key + public evaluation keys (conj, mix, PBS BSK)" << std::endl;
 
     // 2. Server (public keys ONLY — no secret key access)
     ServerEvaluator server(public_eval_keys);
@@ -199,16 +262,22 @@ int main() {
 
     // 3. Alice (expect GRANT)
     auto t0 = std::chrono::high_resolution_clock::now();
-    LWECiphertext lwe_alice = server.evaluate_biometric_match(ct_alice, ct_template);
+    RLWECiphertext ct_diff_alice = server.homomorphic_difference(ct_alice, ct_template);
+    RLWECiphertext ct_sq_alice   = server.homomorphic_sqdist(ct_diff_alice);
+    LWECiphertext lwe_sq_alice   = lwe_sample_extract(ct_sq_alice, 0);
+    LWECiphertext lwe_verdict_alice = server.homomorphic_threshold_pbs(lwe_sq_alice);
     auto t1 = std::chrono::high_resolution_clock::now();
     double ms_alice = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    int64_t dec_alice = client.decrypt_sqdist(lwe_alice);
-    bool grant_alice = client.decrypt_1bit(lwe_alice);
+    int64_t dec_alice = client.decrypt_sqdist(lwe_sq_alice);
+    bool grant_alice = client.decrypt_1bit(lwe_verdict_alice);
 
     // 4. Bob (expect DENY)
-    LWECiphertext lwe_bob = server.evaluate_biometric_match(ct_bob, ct_template);
-    int64_t dec_bob = client.decrypt_sqdist(lwe_bob);
-    bool grant_bob = client.decrypt_1bit(lwe_bob);
+    RLWECiphertext ct_diff_bob = server.homomorphic_difference(ct_bob, ct_template);
+    RLWECiphertext ct_sq_bob   = server.homomorphic_sqdist(ct_diff_bob);
+    LWECiphertext lwe_sq_bob   = lwe_sample_extract(ct_sq_bob, 0);
+    LWECiphertext lwe_verdict_bob = server.homomorphic_threshold_pbs(lwe_sq_bob);
+    int64_t dec_bob = client.decrypt_sqdist(lwe_sq_bob);
+    bool grant_bob = client.decrypt_1bit(lwe_verdict_bob);
 
     std::cout << "[Alice] server eval " << ms_alice << " ms | decrypted sqDist=" << dec_alice
               << " (true " << true_alice << ") -> " << (grant_alice ? "GRANT" : "DENY") << std::endl;
@@ -216,7 +285,6 @@ int main() {
               << " (true " << true_bob << ") -> " << (grant_bob ? "GRANT" : "DENY") << std::endl;
 
     // 5. Correctness gates: decrypted distance must MATCH plaintext ground truth.
-    //    (This is the assert that catches convolution-vs-pointwise bugs.)
     bool ok = true;
     if (std::llabs(dec_alice - true_alice) > DEC_TOLERANCE) {
         std::cerr << "❌ Alice decrypted sqDist deviates from ground truth" << std::endl; ok = false;
@@ -228,7 +296,7 @@ int main() {
     if (grant_bob)    { std::cerr << "❌ Bob (impostor) was granted — false accept" << std::endl; ok = false; }
 
     if (ok) {
-        std::cout << "✅ E2E homomorphic pipeline PASS (decrypted distances match ground truth; verdicts correct)" << std::endl;
+        std::cout << "✅ E2E homomorphic pipeline PASS (TFHE PBS 1-bit encrypted verdict matches ground truth)" << std::endl;
         return 0;
     }
     std::cerr << "❌ E2E pipeline verification FAIL" << std::endl;

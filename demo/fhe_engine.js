@@ -145,10 +145,17 @@ const FHE = (() => {
         return P;
     }
     function mshift(v, j) {
+        j = Math.floor((j % (2 * N) + 2 * N) % (2 * N));
         if (j === 0) return Float64Array.from(v);
         const res = new Float64Array(N);
-        for (let i = j; i < N; ++i) res[i] = v[i - j];
-        for (let i = 0; i < j; ++i) res[i] = mod(-v[N - j + i]);
+        if (j < N) {
+            for (let i = j; i < N; ++i) res[i] = v[i - j];
+            for (let i = 0; i < j; ++i) res[i] = mod(-v[N - j + i]);
+        } else {
+            const k_val = j - N;
+            for (let i = k_val; i < N; ++i) res[i] = mod(-v[i - k_val]);
+            for (let i = 0; i < k_val; ++i) res[i] = v[N - k_val + i];
+        }
         return res;
     }
 
@@ -198,6 +205,58 @@ const FHE = (() => {
         return { a: resA, b: resB };
     }
 
+    function externalProduct(ct, ggsw) {
+        const da = [], db = [];
+        const Ac = new Float64Array(N), Bc = new Float64Array(N);
+        for (let i = 0; i < N; ++i) {
+            Ac[i] = centered(ct.a[i]);
+            Bc[i] = centered(ct.b[i]);
+        }
+        for (let t = 0; t < ell; ++t) {
+            const d_a = new Float64Array(N), d_b = new Float64Array(N);
+            for (let i = 0; i < N; ++i) {
+                let da_val = Ac[i] % Bg;
+                if (da_val < 0) da_val += Bg;
+                if (da_val > Bg / 2) da_val -= Bg;
+                d_a[i] = mod(da_val);
+                Ac[i] = (Ac[i] - da_val) / Bg;
+
+                let db_val = Bc[i] % Bg;
+                if (db_val < 0) db_val += Bg;
+                if (db_val > Bg / 2) db_val -= Bg;
+                d_b[i] = mod(db_val);
+                Bc[i] = (Bc[i] - db_val) / Bg;
+            }
+            da.push(d_a);
+            db.push(d_b);
+        }
+
+        const resA = new Float64Array(N), resB = new Float64Array(N);
+        for (let t = 0; t < ell; ++t) {
+            const da_a = negmul(da[t], ggsw.row_a[t].a);
+            const da_b = negmul(da[t], ggsw.row_a[t].b);
+            const db_a = negmul(db[t], ggsw.row_b[t].a);
+            const db_b = negmul(db[t], ggsw.row_b[t].b);
+
+            for (let i = 0; i < N; ++i) {
+                resA[i] = mod(resA[i] + da_a[i] + db_a[i]);
+                resB[i] = mod(resB[i] + da_b[i] + db_b[i]);
+            }
+        }
+        return { a: resA, b: resB };
+    }
+
+    function cmux(bitGgsw, c0, c1) {
+        const diff = rlweSub(c1, c0);
+        const prod = externalProduct(diff, bitGgsw);
+        const resA = new Float64Array(N), resB = new Float64Array(N);
+        for (let i = 0; i < N; ++i) {
+            resA[i] = mod(c0.a[i] + prod.a[i]);
+            resB[i] = mod(c0.b[i] + prod.b[i]);
+        }
+        return { a: resA, b: resB };
+    }
+
     function rlweSub(ct1, ct2) {
         const a = new Float64Array(N), b = new Float64Array(N);
         for (let i = 0; i < N; ++i) {
@@ -207,29 +266,18 @@ const FHE = (() => {
         return { a, b };
     }
 
-    // Homomorphic sqDist via the Galois tensor (reverse-multiply identity):
-    // Values are coefficient-packed at stride k, so a naive self-square is a
-    // negacyclic CONVOLUTION (constant term ≠ Σd²). Instead multiply f by
-    // σ₋₁(f) (X → X^{2N−1}): the constant coefficient of f·σ₋₁(f) is exactly
-    // Σ f_i², i.e. Δ²·sqDist. The automorphism is applied WITHOUT keyswitching
-    // first (keyswitching before the product would multiply KS noise by the
-    // payload); the σs and s·σs tensor components are keyswitched back AFTER
-    // the product so KS noise enters only additively.
-    //   (b1 − a1·s)(b2 − a2·σs) = b1b2 − (a1b2)·s − (a2b1)·σs + (a1a2)·s·σs
-    // keyswitchPoly output satisfies ks.b = −ks.a·s + p·T + e, i.e. Enc(p·T)
-    // in (B − A·s) convention is (−ks.a, ks.b).
     function rlweSqDist(ctDiff, kskConj, kskMix) {
         const g = 2 * N - 1;
         const a2 = applyAutomorphism(ctDiff.a, g);
         const b2 = applyAutomorphism(ctDiff.b, g);
 
-        const c0 = negmul(ctDiff.b, b2); // constant component
-        const c1 = negmul(ctDiff.a, b2); // coefficient of s
-        const c2 = negmul(a2, ctDiff.b); // coefficient of σs
-        const c3 = negmul(ctDiff.a, a2); // coefficient of s·σs
+        const c0 = negmul(ctDiff.b, b2);
+        const c1 = negmul(ctDiff.a, b2);
+        const c2 = negmul(a2, ctDiff.b);
+        const c3 = negmul(ctDiff.a, a2);
 
-        const ks2 = keyswitchPoly(c2, kskConj); // Enc_s(c2·σs)
-        const ks3 = keyswitchPoly(c3, kskMix);  // Enc_s(c3·s·σs)
+        const ks2 = keyswitchPoly(c2, kskConj);
+        const ks3 = keyswitchPoly(c3, kskMix);
 
         const resA = new Float64Array(N), resB = new Float64Array(N);
         for (let i = 0; i < N; ++i) {
@@ -248,60 +296,83 @@ const FHE = (() => {
             const rng = makeRng(seed);
             const gKS = makeGauss(rng, sigma_ks);
             this.rng = rng;
+
             this.Sq = new Float64Array(N);
             const idxPool = Array.from({ length: N }, (_, i) => i);
             for (let i = 0; i < hS; ++i) {
                 const pick = Math.floor(rng() * idxPool.length);
-                const pos = idxPool.splice(pick, 1)[0];
-                const val = i % 2 === 0 ? 1 : -1;
-                this.Sq[pos] = mod(val);
+                const pos = idxPool[pick];
+                idxPool.splice(pick, 1);
+                this.Sq[pos] = (i % 2 === 0) ? 1 : -1;
             }
+
+            this.makeKsk = (target) => {
+                const ksk = [];
+                for (let t = 0; t < ell; ++t) {
+                    const a = new Float64Array(N), b = new Float64Array(N);
+                    for (let i = 0; i < N; ++i) a[i] = Math.floor(rng() * q);
+                    const aS = negmul(a, this.Sq);
+                    const Bgt = powmod(Bg, t);
+                    for (let i = 0; i < N; ++i) {
+                        const e = Math.round(gKS());
+                        b[i] = mod(-aS[i] + mulmod(Bgt, mod(target[i])) + e);
+                    }
+                    ksk.push({ a, b });
+                }
+                return ksk;
+            };
         }
 
-        makeKsk(target) {
-            const gKS = makeGauss(this.rng, sigma_ks);
-            const ksk = [];
+        makeGgsw(index, val) {
+            const row_a = [], row_b = [];
             for (let t = 0; t < ell; ++t) {
-                const aK = new Float64Array(N), bK = new Float64Array(N);
-                for (let i = 0; i < N; ++i) aK[i] = Math.floor(this.rng() * q);
-                const aS = negmul(aK, this.Sq);
                 const Bgt = powmod(Bg, t);
-                for (let i = 0; i < N; ++i) {
-                    bK[i] = mod(-aS[i] + mulmod(Bgt, mod(target[i])) + Math.round(gKS()));
-                }
-                ksk.push({ a: aK, b: bK });
+                const target_a = new Float64Array(N), target_b = new Float64Array(N);
+                target_a[0] = mulmod(Bgt, mod(val * this.Sq[index]));
+                target_b[0] = mulmod(Bgt, mod(val));
+                row_a.push(this.makeKsk(target_a)[0]);
+                row_b.push(this.makeKsk(target_b)[0]);
             }
-            return ksk;
+            return { row_a, row_b };
         }
 
         generateEvaluationKeys() {
-            const SqConj = applyAutomorphism(this.Sq, 2 * N - 1);
-            const kskConj = this.makeKsk(SqConj);                 // σ₋₁(Sq)    → Sq
-            const kskMix = this.makeKsk(negmul(this.Sq, SqConj)); // Sq·σ₋₁(Sq) → Sq
-            return { kskConj, kskMix };
+            const Sq_conj = applyAutomorphism(this.Sq, 2 * N - 1);
+            const kskConj = this.makeKsk(Sq_conj);
+            const kskMix = this.makeKsk(negmul(this.Sq, Sq_conj));
+            const kskPbs = [];
+            for (let i = 0; i < N; ++i) {
+                if (this.Sq[i] !== 0) {
+                    const sSign = this.Sq[i] > 0 ? 1 : -1;
+                    kskPbs.push({ index: i, sign: sSign, ggsw: this.makeGgsw(i, 1) });
+                }
+            }
+            return { kskConj, kskMix, kskPbs };
         }
 
         encryptVector(vec) {
             const gEnc = makeGauss(this.rng, sigma_enc);
+            const a = new Float64Array(N), b = new Float64Array(N);
             const M = embed(vec);
-            const ctA = new Float64Array(N), ctB = new Float64Array(N);
-            for (let i = 0; i < N; ++i) ctA[i] = Math.floor(this.rng() * q);
-            const aS = negmul(ctA, this.Sq);
+            for (let i = 0; i < N; ++i) a[i] = Math.floor(this.rng() * q);
+            const aS = negmul(a, this.Sq);
             for (let i = 0; i < N; ++i) {
                 const e = Math.round(gEnc());
-                ctB[i] = mod(aS[i] + mulmod(A_amp, M[i]) + e);
+                b[i] = mod(aS[i] + mulmod(A_amp, mod(M[i])) + e);
             }
-            return { a: ctA, b: ctB };
+            return { a, b };
         }
 
         decryptSqDist(lweCt) {
             const aS = negmul(lweCt.a, this.Sq);
             const phase = centered(mod(lweCt.b - aS[0]));
-            return Math.round(phase / (A_amp * A_amp)); // Δ² = 1024
+            return Math.round(phase / (A_amp * A_amp));
         }
 
-        decrypt1bit(lweCt) {
-            return this.decryptSqDist(lweCt) <= MATCH_THRESHOLD;
+        decrypt1bit(lweVerdict) {
+            const aS = negmul(lweVerdict.a, this.Sq);
+            const phase = centered(mod(lweVerdict.b - aS[0]));
+            return phase <= 0;
         }
 
         decryptSqDistSlot0(rlweCt) {
@@ -320,16 +391,42 @@ const FHE = (() => {
             return rlweSub(ctLive, ctTemplate);
         }
 
-        // Enc(d) → Enc(Δ²·Σd_i² in constant coeff); no rotate-sum needed —
-        // the reverse-multiply identity places the full sum in slot 0 directly.
         homomorphicSqDist(ctDiff) {
             return rlweSqDist(ctDiff, this.evalKeys.kskConj, this.evalKeys.kskMix);
         }
 
-        // TODO(Phase 3+): real TFHE PBS producing an encrypted 1-bit verdict.
-        // Currently an IDENTITY STUB — the client thresholds after decryption.
         homomorphicThresholdPBS(lweSqdist) {
-            return { a: Float64Array.from(lweSqdist.a), b: lweSqdist.b };
+            let bPrime = Math.round(centered(lweSqdist.b) * (2.0 * N) / q);
+            bPrime = (bPrime % (2 * N) + 2 * N) % (2 * N);
+
+            const aPrime = new Int32Array(N);
+            for (let i = 0; i < N; ++i) {
+                let ap = Math.round(centered(lweSqdist.a[i]) * (2.0 * N) / q);
+                aPrime[i] = (ap % (2 * N) + 2 * N) % (2 * N);
+            }
+
+            const V = new Float64Array(N);
+            const thresholdJ = Math.round(MATCH_THRESHOLD * A_amp * A_amp * (2.0 * N) / q);
+            for (let j = 0; j < N; ++j) {
+                V[j] = (j <= thresholdJ) ? A_amp : mod(-A_amp);
+            }
+
+            let acc = { a: new Float64Array(N), b: mshift(V, -bPrime) };
+
+            for (const bskEntry of this.evalKeys.kskPbs) {
+                const i = bskEntry.index;
+                let shiftI = (bskEntry.sign > 0) ? aPrime[i] : -aPrime[i];
+                shiftI = (shiftI % (2 * N) + 2 * N) % (2 * N);
+                if (shiftI !== 0) {
+                    const accShifted = {
+                        a: mshift(acc.a, shiftI),
+                        b: mshift(acc.b, shiftI)
+                    };
+                    acc = cmux(bskEntry.ggsw, acc, accShifted);
+                }
+            }
+
+            return lweSampleExtract(acc, 0);
         }
 
         evaluateBiometricMatch(ctLive, ctTemplate) {
@@ -359,13 +456,16 @@ const FHE = (() => {
         const ctTemplate = client.encryptVector(templateVector);
 
         const t0 = performance.now();
-        const lweMatch = server.evaluateBiometricMatch(ctLive, ctTemplate);
+        const ctDiff = server.homomorphicDifference(ctLive, ctTemplate);
+        const ctSq = server.homomorphicSqDist(ctDiff);
+        const lweSqdist = lweSampleExtract(ctSq, 0);
+        const lweVerdict = server.homomorphicThresholdPBS(lweSqdist);
         const glueMs = performance.now() - t0;
 
-        // Verdict AND displayed distance both come from the homomorphic result.
-        // sqDistPlain is kept ONLY as ground truth for the correctness check.
-        const sqDistDec = client.decryptSqDist(lweMatch);
-        const isMatch = client.decrypt1bit(lweMatch);
+        // Verdict comes from 1-bit TFHE PBS verdict ciphertext lweVerdict.
+        // sqDistDec comes from lweSqdist for ground-truth verification.
+        const sqDistDec = client.decryptSqDist(lweSqdist);
+        const isMatch = client.decrypt1bit(lweVerdict);
         const homomorphicExact = Math.abs(sqDistDec - sqDistPlain) <= DEC_TOLERANCE;
         const simScore = Math.max(0, Math.min(100, 100.0 - (sqDistDec / 550.0)));
 

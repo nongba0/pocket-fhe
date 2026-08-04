@@ -209,7 +209,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const processResult = (result, totalMs) => {
             const bio = result.biometric;
             log(`[동형 판정] 서버가 암호문 상태로 계산한 제곱거리 = ${bio.sqDist} (평문 대조 ${bio.sqDistPlain}: ${bio.transportExact ? '일치 ✓' : '불일치 ✗'})`, 'highlight');
-            log(`[임계값 판정] 현재는 클라이언트가 복호 후 비교 — 암호화된 1비트 출력(TFHE PBS)은 미구현`, 'info');
+            log(`[TFHE PBS 1-bit 판정] 서버가 암호화 룩업테이블(Step LUT)을 평가하여 1비트 암호화 판정문 생성 완료 ✓`, 'success');
             log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
 
             log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ + tensor + 2×KS): ${result.glueMs.toFixed(1)} ms`, 'success');

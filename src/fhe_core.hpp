@@ -153,10 +153,17 @@ inline std::vector<int64_t> embed(const std::vector<int64_t>& v) {
 }
 
 inline std::vector<int64_t> mshift(const std::vector<int64_t>& v, int j) {
+    j = (j % (2 * N) + 2 * N) % (2 * N);
     if (j == 0) return v;
     std::vector<int64_t> res(N, 0);
-    for (int i = j; i < N; ++i) res[i] = v[i - j];
-    for (int i = 0; i < j; ++i) res[i] = mod(-v[N - j + i]);
+    if (j < N) {
+        for (int i = j; i < N; ++i) res[i] = v[i - j];
+        for (int i = 0; i < j; ++i) res[i] = mod(-v[N - j + i]);
+    } else {
+        int k_val = j - N;
+        for (int i = k_val; i < N; ++i) res[i] = mod(-v[i - k_val]);
+        for (int i = 0; i < k_val; ++i) res[i] = v[N - k_val + i];
+    }
     return res;
 }
 
@@ -170,6 +177,12 @@ struct RLWECiphertext {
     std::vector<int64_t> b;
     RLWECiphertext() : a(N, 0), b(N, 0) {}
     RLWECiphertext(const std::vector<int64_t>& _a, const std::vector<int64_t>& _b) : a(_a), b(_b) {}
+};
+
+struct GGSWCiphertext {
+    std::vector<RLWECiphertext> row_a; // size ell
+    std::vector<RLWECiphertext> row_b; // size ell
+    GGSWCiphertext() : row_a(ell), row_b(ell) {}
 };
 
 struct LWECiphertext {
@@ -232,10 +245,59 @@ inline RLWECiphertext keyswitch_poly(const std::vector<int64_t>& poly, const std
     return res;
 }
 
-// Homomorphic automorphism X -> X^g: apply sigma_g to both components, then
-// key-switch sigma_g(a) back to the base key s using a KSK that encrypts
-// Bg^t * sigma_g(s) under s (b = -a*s + Bg^t*sigma_g(s) + e).
-// Resulting phase: b' - a'*s = sigma_g(b - a*s) - e'.
+inline RLWECiphertext external_product(const RLWECiphertext& ct, const GGSWCiphertext& ggsw, const NTTRoots& roots) {
+    std::vector<std::vector<int64_t>> da(ell, std::vector<int64_t>(N));
+    std::vector<std::vector<int64_t>> db(ell, std::vector<int64_t>(N));
+    
+    std::vector<int64_t> Ac(N), Bc(N);
+    for (int i = 0; i < N; ++i) {
+        Ac[i] = centered(ct.a[i]);
+        Bc[i] = centered(ct.b[i]);
+    }
+    for (int t = 0; t < ell; ++t) {
+        for (int i = 0; i < N; ++i) {
+            int64_t da_val = Ac[i] % Bg;
+            if (da_val < 0) da_val += Bg;
+            if (da_val > Bg / 2) da_val -= Bg;
+            da[t][i] = mod(da_val);
+            Ac[i] = (Ac[i] - da_val) / Bg;
+
+            int64_t db_val = Bc[i] % Bg;
+            if (db_val < 0) db_val += Bg;
+            if (db_val > Bg / 2) db_val -= Bg;
+            db[t][i] = mod(db_val);
+            Bc[i] = (Bc[i] - db_val) / Bg;
+        }
+    }
+
+    RLWECiphertext res;
+    for (int t = 0; t < ell; ++t) {
+        std::vector<int64_t> da_a = negmul(da[t], ggsw.row_a[t].a, roots);
+        std::vector<int64_t> da_b = negmul(da[t], ggsw.row_a[t].b, roots);
+        
+        std::vector<int64_t> db_a = negmul(db[t], ggsw.row_b[t].a, roots);
+        std::vector<int64_t> db_b = negmul(db[t], ggsw.row_b[t].b, roots);
+
+        for (int i = 0; i < N; ++i) {
+            res.a[i] = mod(res.a[i] + da_a[i] + db_a[i]);
+            res.b[i] = mod(res.b[i] + da_b[i] + db_b[i]);
+        }
+    }
+    return res;
+}
+
+inline RLWECiphertext cmux(const GGSWCiphertext& bit_ggsw, const RLWECiphertext& c0, const RLWECiphertext& c1, const NTTRoots& roots) {
+    RLWECiphertext diff = rlwe_sub(c1, c0);
+    RLWECiphertext prod = external_product(diff, bit_ggsw, roots);
+    RLWECiphertext res;
+    for (int i = 0; i < N; ++i) {
+        res.a[i] = mod(c0.a[i] + prod.a[i]);
+        res.b[i] = mod(c0.b[i] + prod.b[i]);
+    }
+    return res;
+}
+
+// Homomorphic automorphism X -> X^g
 inline RLWECiphertext rlwe_automorphism(const RLWECiphertext& ct, int g, const std::vector<KSKPair>& ksk, const NTTRoots& roots) {
     std::vector<int64_t> ra = apply_automorphism(ct.a, g);
     std::vector<int64_t> rb = apply_automorphism(ct.b, g);
@@ -249,7 +311,6 @@ inline RLWECiphertext rlwe_automorphism(const RLWECiphertext& ct, int g, const s
 }
 
 inline RLWECiphertext rlwe_mult_relin(const RLWECiphertext& ct1, const RLWECiphertext& ct2, const std::vector<KSKPair>& ksk_relin, const NTTRoots& roots) {
-    // Tensor Product: (b1 - a1*s) * (b2 - a2*s) = b1*b2 - (a1*b2 + a2*b1)*s + a1*a2 * s^2
     std::vector<int64_t> b1b2 = negmul(ct1.b, ct2.b, roots);
     std::vector<int64_t> a1b2 = negmul(ct1.a, ct2.b, roots);
     std::vector<int64_t> a2b1 = negmul(ct2.a, ct1.b, roots);
@@ -260,7 +321,6 @@ inline RLWECiphertext rlwe_mult_relin(const RLWECiphertext& ct1, const RLWECiphe
         a_cross[i] = mod(a1b2[i] + a2b1[i]);
     }
 
-    // Relinearize a1a2 (multiplier for s^2) using ksk_relin (encrypts s^2 under s)
     RLWECiphertext ks_s2 = keyswitch_poly(a1a2, ksk_relin, roots);
 
     RLWECiphertext res;
