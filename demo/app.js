@@ -139,7 +139,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const db = FaceEncoder.getDatabase();
 
         log(`[1:N 검색] ${db.length}명의 차분 벡터를 k=16 배치 암호문에 실어 한 번의 파이프라인으로 동시 처리 (배치 = 갤러리)`, 'highlight');
-        log(`[안내] 임계값 비교는 클라이언트가 복호 후 수행 — 암호화된 1비트 출력(TFHE PBS)은 미구현`, 'info');
+        log(`[안내] 1:N 랭킹은 거리값 자체가 필요해 PBS를 돌리지 않음 — 암호화된 1비트 판정은 1:1 경로에서 수행`, 'info');
 
         btnRun.disabled = true; btnAlice.disabled = true; btnBob.disabled = true; btnScanFace.disabled = true; btnSearch1N.disabled = true;
         statusBadge.textContent = 'Executing 1:N Search...';
@@ -158,7 +158,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             log(`[1:N 최종 검색 결과] ${multi.status}`, multi.isMatch ? 'success' : 'error');
 
-            log(`[Stage 2] 서버 동형 평가 실측 (${multi.totalUsers}명 × [diff + σ₋₁ + tensor + 2×KS]): ${result.glueMs.toFixed(1)} ms`, 'success');
+            log(`[Stage 2] 서버 동형 평가 실측 (${multi.totalUsers}명 × [diff + σ₋₁ tensor + 2×KS]): ${result.glueMs.toFixed(1)} ms`, 'success');
 
             slots.forEach((s, idx) => {
                 setTimeout(() => {
@@ -209,10 +209,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const processResult = (result, totalMs) => {
             const bio = result.biometric;
             log(`[동형 판정] 서버가 암호문 상태로 계산한 제곱거리 = ${bio.sqDist} (평문 대조 ${bio.sqDistPlain}: ${bio.transportExact ? '일치 ✓' : '불일치 ✗'})`, 'highlight');
-            log(`[TFHE PBS 1-bit 판정] 서버가 암호화 룩업테이블(Step LUT)을 평가하여 1비트 암호화 판정문 생성 완료 ✓`, 'success');
+            log(`[TFHE PBS] 서버가 LWE 키스위치 → 128회 CMux blind rotation → Step LUT 평가로 암호화된 1비트 판정문 생성 ✓`, 'success');
             log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
 
-            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ + tensor + 2×KS): ${result.glueMs.toFixed(1)} ms`, 'success');
+            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ tensor + 2×KS + PBS): ${result.glueMs.toFixed(1)} ms`, 'success');
             log(`[검증] 동형 거리 vs 평문 거리 일치 여부: ` +
                 (result.pass ? 'PASS' : 'FAIL'), result.pass ? 'success' : 'error');
 
@@ -256,10 +256,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const processResult = (result, totalMs) => {
             const bio = result.biometric;
             log(`[동형 판정] 서버가 암호문 상태로 계산한 제곱거리 = ${bio.sqDist} (평문 대조 ${bio.sqDistPlain}: ${bio.transportExact ? '일치 ✓' : '불일치 ✗'})`, 'highlight');
-            log(`[임계값 판정] 현재는 클라이언트가 복호 후 비교 — 암호화된 1비트 출력(TFHE PBS)은 미구현`, 'info');
+            log(`[TFHE PBS] 서버가 LWE 키스위치 → 128회 CMux blind rotation → Step LUT 평가로 암호화된 1비트 판정문 생성 ✓`, 'success');
             log(`[Face ID 최종 판정] ${bio.status} (유사도: ${bio.simScore}%)`, bio.isMatch ? 'success' : 'error');
 
-            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ + tensor + 2×KS): ${result.glueMs.toFixed(1)} ms`, 'success');
+            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ tensor + 2×KS + PBS): ${result.glueMs.toFixed(1)} ms`, 'success');
             log(`[검증] 동형 거리 vs 평문 거리 일치 여부: ` +
                 (result.pass ? 'PASS' : 'FAIL'), result.pass ? 'success' : 'error');
 
@@ -309,7 +309,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const processResult = (result, totalMs) => {
             log(`[동형 판정] 서버가 암호문 상태로 계산한 제곱거리 = ${result.biometric.sqDist} ` +
                 `(평문 대조 ${result.biometric.sqDistPlain}: ${result.biometric.transportExact ? '일치 ✓' : '불일치 ✗'})`, 'highlight');
-            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ + tensor + 2×KS): ${result.glueMs.toFixed(1)} ms`, 'success');
+            log(`[Stage 2] 서버 동형 평가 실측 (diff + σ₋₁ tensor + 2×KS + PBS): ${result.glueMs.toFixed(1)} ms`, 'success');
             log(`[검증] 동형 거리 vs 평문 거리 일치 여부: ` +
                 (result.pass ? 'PASS' : 'FAIL'), result.pass ? 'success' : 'error');
 

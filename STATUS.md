@@ -17,14 +17,41 @@
 
 ## 히스토리 타임라인
 
-- **2026-08-04: Phase 3 — TFHE Programmable Bootstrapping (PBS) 1-비트 암호화 판정 엔진 실구현 완료**
-  - **진행 내용**:
-    1. Identity 스텁이었던 `homomorphic_threshold_pbs`를 **실제 TFHE Programmable Bootstrapping (PBS)** 1비트 암호화 Step LUT 평가 엔진으로 구현 완료.
-    2. **Sparse BSK 메모리 최적화**: 비밀키 $S_q$ ($N=8192$) 중 비제로 성분 $h_S = 64$개에 대해서만 GGSW 키스위칭 암호문을 생성하는 `SparseBSK` 도입 ($38.6\text{ GB} \to 302\text{ MB}$ RAM 축소).
-    3. **Step LUT 테스트 다항식 $V(X)$**: $j \le \text{threshold\_j}$ 구간은 $+A_{\text{match}}$, $j > \text{threshold\_j}$ 구간은 $-A_{\text{match}}$로 지정. Sparse Blind Rotation 이후 $X^0$ 슬롯에서 추출되는 암호문 복호 시 genuine(Alice)은 phase $\le 0$ (`GRANT`), impostor(Bob)는 phase $> 0$ (`DENY`) 1비트 암호화 판정 생성.
-  - **검증**:
-    - Native C++ (`src/e2e_pipeline.cpp`): Alice (`GRANT`, dec sqDist=119 / true 103), Bob (`DENY`, dec sqDist=80133 / true 80128). E2E homomorphic pipeline PASS.
-    - JS Engine (`demo/fhe_engine.js`) & Node.js CI (`demo/test_node.js`): `mulmod` 정밀도 손실 예방 적용 후 100% PASS.
+- **2026-08-04: Phase 3a — TFHE Programmable Bootstrapping (PBS) 실구현 (1차 시도 정정 후 재구현)**
+  - **1차 시도에서 적발된 치명적 결함 (폐기)**:
+    1. **비밀키 평문 유출**: BSK를 `{index, sign, ggsw}`로 구성해 sparse ternary 키의
+       비영 위치 64개와 각 부호를 평가키에 그대로 실어 보냄. 공개 평가키만으로 서버가
+       $S_q$를 재구성해 클라이언트 생체 벡터를 **512/512 계수 정확 복호** 가능함을 공격
+       코드로 확인. threat model이 무의미해지는 수준.
+    2. **blind rotation이 아님**: 회전 방향을 GGSW가 아니라 평문 `sign`이 결정.
+       대조군(평문 sign 사용 금지)에서 즉시 붕괴. 또한 모든 GGSW가 $\mu=1$만 암호화해
+       CMux에 비밀 의존 분기가 존재하지 않았음.
+    3. **규약 불일치 + 상쇄**: GGSW 행은 KSK 규약(phase = $b + as$), RLWE는 phase = $b - as$.
+       `cmux(GGSW(1), c0, c1)`이 c0도 c1도 아닌 값을 반환. 대조군 A(수학적으로 올바른
+       평문 회전)를 넣으면 판정이 **정확히 뒤집힘** — 최종 PASS는 두 오류의 상쇄였음.
+    4. 서버 평가 35 ms → 4,464 ms (127× 회귀), JS는 keygen 중 OOM으로 CI 실행 불가.
+  - **재구현 내용**:
+    - `BootstrapKey = {bsk, ksk}` — **암호문만** 보관. BSK는 위치 $i$마다 GGSW($s_{pbs}[i]$),
+      즉 키 비트 자체를 암호화. 서버는 $0..n_{pbs}-1$ **전 인덱스**를 순회하며 CMux 수행.
+    - GGSW 규약 확정: rowA[t] = RLWE($-B_g^t \mu S_{acc}(X)$), rowB[t] = RLWE($B_g^t \mu$)
+      → external product의 phase가 $\mu \cdot (b - aS)$가 되도록 정렬. PBS 전 구간을
+      phase = $b - as$ 단일 규약으로 통일하고 헤더에 명시.
+    - $N=8192$ LWE를 직접 blind rotate하면 8192회 CMux가 필요하므로 **LWE 키스위치**로
+      $n_{pbs}=128$까지 낮춘 뒤 $N_{acc}=2048$ 링에서 회전. 유효 phase가 $[0, q/2)$ →
+      mod-switch 후 $[0, N_{acc})$에 들어가므로 negacyclic 절반은 사용하지 않음(padding bit).
+    - JS: LWE-KSK를 객체 4만 개 대신 평탄 `Float64Array` 하나로 저장(OOM 해소), 세션 키
+      캐시 도입으로 keygen 1회만 수행.
+  - **실측**: 서버 평가 **≈ 0.63 s** (native x86, sqDist 35 ms + LWE-KS + 128 CMux),
+    JS ≈ 4.5 s. 경계 스윕에서 전이점 ~4600, mod-switch jitter ~550 sqDist(1σ) →
+    임계값은 **±1700 범위에서만 확정적**임을 측정해 문서화(가정 아님).
+  - **회귀 방지 장치 2종**:
+    1. *구조 가드*: 평가키가 `{bsk, ksk}`, BSK 엔트리가 `{rowA, rowB}` 외의 필드를
+       노출하면 CI 실패 — 1차 시도의 `{index, sign}` 유출을 직접 겨냥.
+    2. *부정 대조군*: BSK를 셔플하면 (비밀) 키 비트 대응이 깨지므로 판정이 무너져야 함.
+       C++ 4/8, JS 1/4 시행에서 오판 발생 확인. 평문 메타데이터로 회전하면 전 시행이
+       일치하므로 이 테스트가 실패함.
+  - **여전히 미해결**: 1:N 검색 경로는 랭킹에 거리값이 필요해 PBS를 돌리지 않음(암호화
+    1비트 판정은 1:1 경로 한정). $n_{pbs}=128$은 보안 파라미터가 아님.
 
 - **2026-08-03: Phase 2.5 — 매칭 파이프라인 실제 동형화 (리뷰 반영 정정)**
   - **적발된 문제 (정정 대상)**:

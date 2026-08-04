@@ -35,6 +35,25 @@ static const double sigma_ks = 1.0;
 static const double sigma_enc = 1.0;
 static const double sigma_eval = q * std::pow(2.0, -25.0);
 
+// ---- TFHE Programmable Bootstrapping (PBS) stage parameters ----
+// The sqDist stage produces an LWE ciphertext of dimension N=8192 under the
+// sparse key Sq. Blind-rotating that directly would need 8192 CMux, so the
+// ciphertext is first LWE-key-switched down to dimension n_pbs under a binary
+// key, and the rotation happens in a smaller accumulator ring R_{N_acc}.
+static const int N_acc   = 2048; // blind-rotation accumulator ring degree
+static const int n_pbs   = 128;  // LWE dimension after key-switch (binary key)
+static const int Bg_acc  = 256;  // GGSW gadget base (2^8)
+static const int ell_acc = 4;    // 256^4 = 2^32 >= q
+static const int Bg_ks   = 128;  // LWE key-switch gadget base (2^7)
+static const int ell_ks  = 5;    // 128^5 = 2^35 >= q
+static const int h_acc   = 64;   // sparse ternary weight of the accumulator key
+static const int64_t Delta_out = q / 8; // encoding of the 1-bit verdict
+// LUT resolution: the phase is mod-switched from q onto 2*N_acc points, so one
+// LUT slot spans q/(2*N_acc*Delta_match^2) ≈ 238 sqDist units. Mod-switch
+// rounding adds ~sqrt(n_pbs/2/12) ≈ 2.3 slots of jitter (measured: ~550 sqDist
+// units, 1 sigma). The threshold is therefore only sharp to ~±1700 (3 sigma) —
+// fine for decisions far from the boundary, and measured by the sweep test.
+
 inline int64_t mod(int64_t x) {
     int64_t r = x % q;
     return r < 0 ? r + q : r;
@@ -179,12 +198,6 @@ struct RLWECiphertext {
     RLWECiphertext(const std::vector<int64_t>& _a, const std::vector<int64_t>& _b) : a(_a), b(_b) {}
 };
 
-struct GGSWCiphertext {
-    std::vector<RLWECiphertext> row_a; // size ell
-    std::vector<RLWECiphertext> row_b; // size ell
-    GGSWCiphertext() : row_a(ell), row_b(ell) {}
-};
-
 struct LWECiphertext {
     std::vector<int64_t> a;
     int64_t b;
@@ -245,58 +258,6 @@ inline RLWECiphertext keyswitch_poly(const std::vector<int64_t>& poly, const std
     return res;
 }
 
-inline RLWECiphertext external_product(const RLWECiphertext& ct, const GGSWCiphertext& ggsw, const NTTRoots& roots) {
-    std::vector<std::vector<int64_t>> da(ell, std::vector<int64_t>(N));
-    std::vector<std::vector<int64_t>> db(ell, std::vector<int64_t>(N));
-    
-    std::vector<int64_t> Ac(N), Bc(N);
-    for (int i = 0; i < N; ++i) {
-        Ac[i] = centered(ct.a[i]);
-        Bc[i] = centered(ct.b[i]);
-    }
-    for (int t = 0; t < ell; ++t) {
-        for (int i = 0; i < N; ++i) {
-            int64_t da_val = Ac[i] % Bg;
-            if (da_val < 0) da_val += Bg;
-            if (da_val > Bg / 2) da_val -= Bg;
-            da[t][i] = mod(da_val);
-            Ac[i] = (Ac[i] - da_val) / Bg;
-
-            int64_t db_val = Bc[i] % Bg;
-            if (db_val < 0) db_val += Bg;
-            if (db_val > Bg / 2) db_val -= Bg;
-            db[t][i] = mod(db_val);
-            Bc[i] = (Bc[i] - db_val) / Bg;
-        }
-    }
-
-    RLWECiphertext res;
-    for (int t = 0; t < ell; ++t) {
-        std::vector<int64_t> da_a = negmul(da[t], ggsw.row_a[t].a, roots);
-        std::vector<int64_t> da_b = negmul(da[t], ggsw.row_a[t].b, roots);
-        
-        std::vector<int64_t> db_a = negmul(db[t], ggsw.row_b[t].a, roots);
-        std::vector<int64_t> db_b = negmul(db[t], ggsw.row_b[t].b, roots);
-
-        for (int i = 0; i < N; ++i) {
-            res.a[i] = mod(res.a[i] + da_a[i] + db_a[i]);
-            res.b[i] = mod(res.b[i] + da_b[i] + db_b[i]);
-        }
-    }
-    return res;
-}
-
-inline RLWECiphertext cmux(const GGSWCiphertext& bit_ggsw, const RLWECiphertext& c0, const RLWECiphertext& c1, const NTTRoots& roots) {
-    RLWECiphertext diff = rlwe_sub(c1, c0);
-    RLWECiphertext prod = external_product(diff, bit_ggsw, roots);
-    RLWECiphertext res;
-    for (int i = 0; i < N; ++i) {
-        res.a[i] = mod(c0.a[i] + prod.a[i]);
-        res.b[i] = mod(c0.b[i] + prod.b[i]);
-    }
-    return res;
-}
-
 // Homomorphic automorphism X -> X^g
 inline RLWECiphertext rlwe_automorphism(const RLWECiphertext& ct, int g, const std::vector<KSKPair>& ksk, const NTTRoots& roots) {
     std::vector<int64_t> ra = apply_automorphism(ct.a, g);
@@ -329,6 +290,180 @@ inline RLWECiphertext rlwe_mult_relin(const RLWECiphertext& ct1, const RLWECiphe
         res.b[i] = mod(b1b2[i] + ks_s2.b[i]);
     }
     return res;
+}
+
+// ============================================================================
+//  TFHE Programmable Bootstrapping (PBS)
+//
+//  CONVENTION for this section: every RLWE/LWE ciphertext satisfies
+//        phase = b - <a, s>            (same as encrypt_vector / sample-extract)
+//  The gadget KSKs used by the sqDist stage above use the OPPOSITE convention
+//  (phase = b + a*s). Do not mix the two — that mismatch silently produced
+//  garbage in an earlier revision.
+//
+//  SECURITY INVARIANT: the bootstrapping key is an array of GGSW ciphertexts
+//  indexed by position only. It carries NO plaintext key material — no
+//  positions-of-nonzeros, no signs. The server iterates over every index
+//  0..n_pbs-1 and performs a CMux at each one; which branch is taken is
+//  decided homomorphically by the GGSW, never by data the server can read.
+//  An earlier revision shipped {index, sign} alongside each GGSW, which handed
+//  the entire sparse secret key to the server.
+// ============================================================================
+
+// Signed (balanced) base-`base` decomposition of a centered residue.
+inline void signed_decompose(int64_t x, int64_t base, int len, int64_t* out) {
+    int64_t v = centered(x);
+    for (int t = 0; t < len; ++t) {
+        int64_t d = v % base;
+        if (d < 0) d += base;
+        if (d > base / 2) d -= base;
+        out[t] = d;
+        v = (v - d) / base;
+    }
+}
+
+struct LWESmall {                 // dimension n_pbs, key s_pbs (binary)
+    std::vector<int64_t> a;
+    int64_t b;
+    LWESmall() : a(n_pbs, 0), b(0) {}
+};
+
+struct RLWEAcc {                  // degree N_acc, key S_acc
+    std::vector<int64_t> a, b;
+    RLWEAcc() : a(N_acc, 0), b(N_acc, 0) {}
+};
+
+// GGSW(mu) under S_acc:
+//   rowA[t] = RLWE(-Bg_acc^t * mu * S_acc(X))
+//   rowB[t] = RLWE( Bg_acc^t * mu)
+// so that <Decomp(a) , rowA> + <Decomp(b) , rowB> has phase mu*(b - a*S) .
+struct GGSWAcc {
+    std::vector<RLWEAcc> rowA, rowB;
+    GGSWAcc() : rowA(ell_acc), rowB(ell_acc) {}
+};
+
+// Public evaluation material for bootstrapping. Contains ciphertexts only.
+struct BootstrapKey {
+    std::vector<GGSWAcc> bsk;                   // n_pbs entries: GGSW(s_pbs[i])
+    std::vector<std::vector<LWESmall>> ksk;     // [N][ell_ks]: LWE(Bg_ks^t * S_ext[j])
+    NTTRoots roots_acc;
+};
+
+// Key seen by an LWE sample-extracted at coefficient 0 of a degree-`deg` RLWE:
+//   (a*S)[0] = a_0 S_0 - sum_{j>=1} a_j S_{deg-j}
+inline std::vector<int64_t> extract_key(const std::vector<int64_t>& S, int deg) {
+    std::vector<int64_t> E(deg);
+    E[0] = S[0];
+    for (int j = 1; j < deg; ++j) E[j] = -S[deg - j];
+    return E;
+}
+
+// Multiply a polynomial by X^shift in R = Z_q[X]/(X^deg + 1). shift may be
+// negative and is reduced mod 2*deg (X^deg = -1).
+inline std::vector<int64_t> mono_mul(const std::vector<int64_t>& p, int shift, int deg) {
+    int s = ((shift % (2 * deg)) + 2 * deg) % (2 * deg);
+    std::vector<int64_t> r(deg, 0);
+    for (int i = 0; i < deg; ++i) {
+        int idx = i + s;
+        bool neg = false;
+        if (idx >= 2 * deg) idx -= 2 * deg;
+        if (idx >= deg) { idx -= deg; neg = true; }
+        r[idx] = neg ? mod(-p[i]) : mod(p[i]);
+    }
+    return r;
+}
+
+// LWE key-switch: LWE_{N, S_ext}(m) -> LWE_{n_pbs, s_pbs}(m).
+//   a' = -sum_{j,t} d_{j,t} A_{j,t},   b' = b - sum_{j,t} d_{j,t} B_{j,t}
+inline LWESmall lwe_keyswitch(const LWECiphertext& in,
+                              const std::vector<std::vector<LWESmall>>& ksk) {
+    LWESmall res;
+    res.b = mod(in.b);
+    std::vector<int64_t> dg(ell_ks);
+    for (int j = 0; j < N; ++j) {
+        signed_decompose(in.a[j], Bg_ks, ell_ks, dg.data());
+        for (int t = 0; t < ell_ks; ++t) {
+            if (dg[t] == 0) continue;
+            int64_t d = mod(dg[t]);
+            const LWESmall& K = ksk[j][t];
+            for (int i = 0; i < n_pbs; ++i)
+                res.a[i] = mod(res.a[i] - (__int128(d) * K.a[i]) % q);
+            res.b = mod(res.b - (__int128(d) * K.b) % q);
+        }
+    }
+    return res;
+}
+
+inline RLWEAcc external_product_acc(const RLWEAcc& ct, const GGSWAcc& g, const NTTRoots& roots) {
+    std::vector<std::vector<int64_t>> da(ell_acc, std::vector<int64_t>(N_acc));
+    std::vector<std::vector<int64_t>> db(ell_acc, std::vector<int64_t>(N_acc));
+    std::vector<int64_t> tmp(ell_acc);
+    for (int i = 0; i < N_acc; ++i) {
+        signed_decompose(ct.a[i], Bg_acc, ell_acc, tmp.data());
+        for (int t = 0; t < ell_acc; ++t) da[t][i] = mod(tmp[t]);
+        signed_decompose(ct.b[i], Bg_acc, ell_acc, tmp.data());
+        for (int t = 0; t < ell_acc; ++t) db[t][i] = mod(tmp[t]);
+    }
+    RLWEAcc res;
+    for (int t = 0; t < ell_acc; ++t) {
+        std::vector<int64_t> p1 = negmul(da[t], g.rowA[t].a, roots);
+        std::vector<int64_t> p2 = negmul(da[t], g.rowA[t].b, roots);
+        std::vector<int64_t> p3 = negmul(db[t], g.rowB[t].a, roots);
+        std::vector<int64_t> p4 = negmul(db[t], g.rowB[t].b, roots);
+        for (int i = 0; i < N_acc; ++i) {
+            res.a[i] = mod(res.a[i] + p1[i] + p3[i]);
+            res.b[i] = mod(res.b[i] + p2[i] + p4[i]);
+        }
+    }
+    return res;
+}
+
+// CMux(GGSW(mu), c0, c1) = c0 + mu * (c1 - c0): selects c1 when mu = 1.
+inline RLWEAcc cmux_acc(const GGSWAcc& g, const RLWEAcc& c0, const RLWEAcc& c1, const NTTRoots& roots) {
+    RLWEAcc diff;
+    for (int i = 0; i < N_acc; ++i) {
+        diff.a[i] = mod(c1.a[i] - c0.a[i]);
+        diff.b[i] = mod(c1.b[i] - c0.b[i]);
+    }
+    RLWEAcc prod = external_product_acc(diff, g, roots);
+    RLWEAcc res;
+    for (int i = 0; i < N_acc; ++i) {
+        res.a[i] = mod(c0.a[i] + prod.a[i]);
+        res.b[i] = mod(c0.b[i] + prod.b[i]);
+    }
+    return res;
+}
+
+// Blind rotation: ACC = V(X) * X^{-(b - sum a_i s_i)} = V(X) * X^{-phase}.
+// The loop runs over EVERY index; the secret enters only through the GGSWs.
+inline RLWEAcc blind_rotate(const LWESmall& lwe, const std::vector<int64_t>& testV,
+                            const std::vector<GGSWAcc>& bsk, const NTTRoots& roots) {
+    const int twoN = 2 * N_acc;
+    auto mod_switch = [&](int64_t x) {
+        long long v = std::llround(static_cast<double>(centered(x)) * twoN / static_cast<double>(q));
+        return static_cast<int>(((v % twoN) + twoN) % twoN);
+    };
+    RLWEAcc acc;
+    acc.b = mono_mul(testV, -mod_switch(lwe.b), N_acc);
+    for (int i = 0; i < n_pbs; ++i) {
+        int shift = mod_switch(lwe.a[i]);
+        RLWEAcc shifted;
+        shifted.a = mono_mul(acc.a, shift, N_acc);
+        shifted.b = mono_mul(acc.b, shift, N_acc);
+        acc = cmux_acc(bsk[i], acc, shifted, roots);
+    }
+    return acc;
+}
+
+// Step LUT: +Delta_out while sqDist <= threshold, -Delta_out above it.
+// Valid phases occupy [0, q/2), which mod-switches into [0, N_acc), so the
+// negacyclic half of the ring is never reached (the usual padding-bit trick).
+inline std::vector<int64_t> make_step_test_poly(int64_t threshold_sqdist) {
+    std::vector<int64_t> V(N_acc);
+    double thr_phase = static_cast<double>(threshold_sqdist) * A_match * A_match;
+    long long thr = std::llround(thr_phase * (2.0 * N_acc) / static_cast<double>(q));
+    for (int j = 0; j < N_acc; ++j) V[j] = (j <= thr) ? mod(Delta_out) : mod(-Delta_out);
+    return V;
 }
 
 } // namespace FHECore

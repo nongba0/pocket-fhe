@@ -23,6 +23,20 @@ const FHE = (() => {
     const DEC_TOLERANCE = 200;   // max |decrypted − plaintext| sqDist deviation
     const MATCH_THRESHOLD = 18000;
 
+    // ---- TFHE Programmable Bootstrapping (PBS) stage ----
+    // The sqDist stage yields an LWE ciphertext of dimension N=8192 under the
+    // sparse key Sq; blind-rotating that directly would need 8192 CMux. It is
+    // first LWE-key-switched down to dimension n_pbs under a binary key, then
+    // rotated in the smaller ring R_{N_acc}.
+    const N_acc = 2048;          // accumulator ring degree
+    const n_pbs = 128;           // LWE dimension after key-switch (binary key)
+    const Bg_acc = 256, ell_acc = 4;   // GGSW gadget: 256^4 = 2^32 >= q
+    const Bg_ks = 128, ell_ks = 5;     // LWE-KS gadget: 128^5 = 2^35 >= q
+    const h_acc = 64;            // accumulator key sparse ternary weight
+    const Delta_out = Math.floor(q / 8); // 1-bit verdict encoding
+    // One LUT slot spans q/(2*N_acc*Δ²) ≈ 238 sqDist units; mod-switch jitter is
+    // ~550 units (1σ), so the threshold is only sharp to about ±1700.
+
     // ---- 정확한 모듈러 산술 (a,b ∈ [0,q)) ----
     function mulmod(a, b) {
         const bHi = Math.floor(b / 32768), bLo = b % 32768;
@@ -159,7 +173,7 @@ const FHE = (() => {
         return res;
     }
 
-    initRoots(n); initRoots(N);
+    initRoots(n); initRoots(N); initRoots(N_acc);
 
     // ---- Homomorphic Pipeline Primitives & Helper Classes ----
 
@@ -205,56 +219,141 @@ const FHE = (() => {
         return { a: resA, b: resB };
     }
 
-    function externalProduct(ct, ggsw) {
-        const da = [], db = [];
-        const Ac = new Float64Array(N), Bc = new Float64Array(N);
-        for (let i = 0; i < N; ++i) {
-            Ac[i] = centered(ct.a[i]);
-            Bc[i] = centered(ct.b[i]);
-        }
-        for (let t = 0; t < ell; ++t) {
-            const d_a = new Float64Array(N), d_b = new Float64Array(N);
-            for (let i = 0; i < N; ++i) {
-                let da_val = Ac[i] % Bg;
-                if (da_val < 0) da_val += Bg;
-                if (da_val > Bg / 2) da_val -= Bg;
-                d_a[i] = mod(da_val);
-                Ac[i] = (Ac[i] - da_val) / Bg;
+    // ========================================================================
+    //  TFHE Programmable Bootstrapping (PBS)
+    //
+    //  CONVENTION here: every RLWE/LWE ciphertext satisfies phase = b - <a,s>
+    //  (same as encryptVector / sample-extract). The gadget KSKs used by the
+    //  sqDist stage use the OPPOSITE convention (phase = b + a*s) — mixing the
+    //  two silently produced garbage in an earlier revision.
+    //
+    //  SECURITY INVARIANT: the bootstrapping key is an array of GGSW ciphertexts
+    //  indexed by position only. It carries NO plaintext key material — no
+    //  nonzero-positions, no signs. The server runs a CMux at every index and
+    //  the branch is chosen homomorphically. An earlier revision shipped
+    //  {index, sign} next to each GGSW, handing the whole secret key over.
+    // ========================================================================
 
-                let db_val = Bc[i] % Bg;
-                if (db_val < 0) db_val += Bg;
-                if (db_val > Bg / 2) db_val -= Bg;
-                d_b[i] = mod(db_val);
-                Bc[i] = (Bc[i] - db_val) / Bg;
+    function signedDecompose(x, base, len, out) {
+        let v = centered(x);
+        for (let t = 0; t < len; ++t) {
+            let d = v % base;
+            if (d < 0) d += base;
+            if (d > base / 2) d -= base;
+            out[t] = d;
+            v = (v - d) / base;
+        }
+    }
+
+    // Key seen by a coefficient-0 sample extraction: (a*S)[0] = a_0 S_0 - Σ_{j≥1} a_j S_{deg-j}
+    function extractKey(S, deg) {
+        const E = new Float64Array(deg);
+        E[0] = S[0];
+        for (let j = 1; j < deg; ++j) E[j] = -S[deg - j];
+        return E;
+    }
+
+    // Multiply by X^shift in Z_q[X]/(X^deg + 1); shift may be negative.
+    function monoMul(p, shift, deg) {
+        const s = ((shift % (2 * deg)) + 2 * deg) % (2 * deg);
+        const r = new Float64Array(deg);
+        for (let i = 0; i < deg; ++i) {
+            let idx = i + s, neg = false;
+            if (idx >= 2 * deg) idx -= 2 * deg;
+            if (idx >= deg) { idx -= deg; neg = true; }
+            r[idx] = neg ? mod(-p[i]) : mod(p[i]);
+        }
+        return r;
+    }
+
+    // The LWE key-switching key is N * ell_ks entries of (n_pbs + 1) numbers.
+    // Stored as ONE flat Float64Array — 40k small objects blew up the heap.
+    const KSK_STRIDE = n_pbs + 1;
+    const kskOffset = (j, t) => (j * ell_ks + t) * KSK_STRIDE;
+
+    // LWE_{N,S_ext}(m) -> LWE_{n_pbs,s_pbs}(m):  a' = -Σ d·A,  b' = b - Σ d·B
+    function lweKeyswitch(inLwe, kskFlat) {
+        const a = new Float64Array(n_pbs);
+        let b = mod(inLwe.b);
+        const dg = new Float64Array(ell_ks);
+        for (let j = 0; j < N; ++j) {
+            signedDecompose(inLwe.a[j], Bg_ks, ell_ks, dg);
+            for (let t = 0; t < ell_ks; ++t) {
+                if (dg[t] === 0) continue;
+                const d = mod(dg[t]);
+                const off = kskOffset(j, t);
+                for (let i = 0; i < n_pbs; ++i) a[i] = mod(a[i] - mulmod(d, kskFlat[off + i]));
+                b = mod(b - mulmod(d, kskFlat[off + n_pbs]));
             }
-            da.push(d_a);
-            db.push(d_b);
         }
+        return { a, b };
+    }
 
-        const resA = new Float64Array(N), resB = new Float64Array(N);
-        for (let t = 0; t < ell; ++t) {
-            const da_a = negmul(da[t], ggsw.row_a[t].a);
-            const da_b = negmul(da[t], ggsw.row_a[t].b);
-            const db_a = negmul(db[t], ggsw.row_b[t].a);
-            const db_b = negmul(db[t], ggsw.row_b[t].b);
-
-            for (let i = 0; i < N; ++i) {
-                resA[i] = mod(resA[i] + da_a[i] + db_a[i]);
-                resB[i] = mod(resB[i] + da_b[i] + db_b[i]);
+    function externalProductAcc(ct, g) {
+        const da = [], db = [];
+        for (let t = 0; t < ell_acc; ++t) { da.push(new Float64Array(N_acc)); db.push(new Float64Array(N_acc)); }
+        const tmp = new Float64Array(ell_acc);
+        for (let i = 0; i < N_acc; ++i) {
+            signedDecompose(ct.a[i], Bg_acc, ell_acc, tmp);
+            for (let t = 0; t < ell_acc; ++t) da[t][i] = mod(tmp[t]);
+            signedDecompose(ct.b[i], Bg_acc, ell_acc, tmp);
+            for (let t = 0; t < ell_acc; ++t) db[t][i] = mod(tmp[t]);
+        }
+        const resA = new Float64Array(N_acc), resB = new Float64Array(N_acc);
+        for (let t = 0; t < ell_acc; ++t) {
+            const p1 = negmul(da[t], g.rowA[t].a);
+            const p2 = negmul(da[t], g.rowA[t].b);
+            const p3 = negmul(db[t], g.rowB[t].a);
+            const p4 = negmul(db[t], g.rowB[t].b);
+            for (let i = 0; i < N_acc; ++i) {
+                resA[i] = mod(resA[i] + p1[i] + p3[i]);
+                resB[i] = mod(resB[i] + p2[i] + p4[i]);
             }
         }
         return { a: resA, b: resB };
     }
 
-    function cmux(bitGgsw, c0, c1) {
-        const diff = rlweSub(c1, c0);
-        const prod = externalProduct(diff, bitGgsw);
-        const resA = new Float64Array(N), resB = new Float64Array(N);
-        for (let i = 0; i < N; ++i) {
-            resA[i] = mod(c0.a[i] + prod.a[i]);
-            resB[i] = mod(c0.b[i] + prod.b[i]);
+    // CMux(GGSW(mu), c0, c1) = c0 + mu·(c1 - c0): selects c1 when mu = 1.
+    function cmuxAcc(g, c0, c1) {
+        const diff = { a: new Float64Array(N_acc), b: new Float64Array(N_acc) };
+        for (let i = 0; i < N_acc; ++i) {
+            diff.a[i] = mod(c1.a[i] - c0.a[i]);
+            diff.b[i] = mod(c1.b[i] - c0.b[i]);
         }
-        return { a: resA, b: resB };
+        const prod = externalProductAcc(diff, g);
+        const a = new Float64Array(N_acc), b = new Float64Array(N_acc);
+        for (let i = 0; i < N_acc; ++i) {
+            a[i] = mod(c0.a[i] + prod.a[i]);
+            b[i] = mod(c0.b[i] + prod.b[i]);
+        }
+        return { a, b };
+    }
+
+    // ACC = V(X)·X^{-(b - Σ a_i s_i)}. The loop visits EVERY index; the secret
+    // enters only through the GGSW ciphertexts.
+    function blindRotate(lwe, testV, bsk) {
+        const twoN = 2 * N_acc;
+        const modSwitch = (x) => {
+            const v = Math.round(centered(x) * twoN / q);
+            return ((v % twoN) + twoN) % twoN;
+        };
+        let acc = { a: new Float64Array(N_acc), b: monoMul(testV, -modSwitch(lwe.b), N_acc) };
+        for (let i = 0; i < n_pbs; ++i) {
+            const shift = modSwitch(lwe.a[i]);
+            const shifted = { a: monoMul(acc.a, shift, N_acc), b: monoMul(acc.b, shift, N_acc) };
+            acc = cmuxAcc(bsk[i], acc, shifted);
+        }
+        return acc;
+    }
+
+    // Step LUT: +Delta_out while sqDist <= threshold, -Delta_out above it.
+    // Valid phases occupy [0, q/2) and mod-switch into [0, N_acc), so the
+    // negacyclic half is never reached (the usual padding-bit trick).
+    function makeStepTestPoly(thresholdSqDist) {
+        const V = new Float64Array(N_acc);
+        const thr = Math.round(thresholdSqDist * A_amp * A_amp * (2 * N_acc) / q);
+        for (let j = 0; j < N_acc; ++j) V[j] = (j <= thr) ? mod(Delta_out) : mod(-Delta_out);
+        return V;
     }
 
     function rlweSub(ct1, ct2) {
@@ -297,14 +396,20 @@ const FHE = (() => {
             const gKS = makeGauss(rng, sigma_ks);
             this.rng = rng;
 
-            this.Sq = new Float64Array(N);
-            const idxPool = Array.from({ length: N }, (_, i) => i);
-            for (let i = 0; i < hS; ++i) {
-                const pick = Math.floor(rng() * idxPool.length);
-                const pos = idxPool[pick];
-                idxPool.splice(pick, 1);
-                this.Sq[pos] = (i % 2 === 0) ? 1 : -1;
-            }
+            const sparseTernary = (deg, weight) => {
+                const S = new Float64Array(deg);
+                const pool = Array.from({ length: deg }, (_, i) => i);
+                for (let i = 0; i < weight; ++i) {
+                    const pick = Math.floor(rng() * pool.length);
+                    S[pool[pick]] = (i % 2 === 0) ? 1 : -1;
+                    pool.splice(pick, 1);
+                }
+                return S;
+            };
+            this.Sq = sparseTernary(N, hS);
+            this.S_acc = sparseTernary(N_acc, h_acc);   // accumulator ring key
+            this.s_pbs = new Float64Array(n_pbs);       // binary LWE key
+            for (let i = 0; i < n_pbs; ++i) this.s_pbs[i] = rng() < 0.5 ? 0 : 1;
 
             this.makeKsk = (target) => {
                 const ksk = [];
@@ -323,31 +428,64 @@ const FHE = (() => {
             };
         }
 
-        makeGgsw(index, val) {
-            const row_a = [], row_b = [];
-            for (let t = 0; t < ell; ++t) {
-                const Bgt = powmod(Bg, t);
-                const target_a = new Float64Array(N), target_b = new Float64Array(N);
-                target_a[0] = mulmod(Bgt, mod(val * this.Sq[index]));
-                target_b[0] = mulmod(Bgt, mod(val));
-                row_a.push(this.makeKsk(target_a)[0]);
-                row_b.push(this.makeKsk(target_b)[0]);
+        // RLWE encryption in R_{N_acc} under S_acc, convention phase = b - a*S.
+        rlweEncAcc(target) {
+            const gE = makeGauss(this.rng, sigma_ks);
+            const a = new Float64Array(N_acc), b = new Float64Array(N_acc);
+            for (let i = 0; i < N_acc; ++i) a[i] = Math.floor(this.rng() * q);
+            const aS = negmul(a, this.S_acc);
+            for (let i = 0; i < N_acc; ++i) b[i] = mod(aS[i] + mod(target[i]) + Math.round(gE()));
+            return { a, b };
+        }
+
+        // GGSW(mu): rowA[t] = RLWE(-Bg_acc^t·mu·S_acc(X)), rowB[t] = RLWE(Bg_acc^t·mu)
+        makeGgswAcc(mu) {
+            const rowA = [], rowB = [];
+            for (let t = 0; t < ell_acc; ++t) {
+                const Bgt = powmod(Bg_acc, t);
+                const tA = new Float64Array(N_acc), tB = new Float64Array(N_acc);
+                for (let i = 0; i < N_acc; ++i) tA[i] = mod(-mulmod(Bgt, mod(mu * this.S_acc[i])));
+                tB[0] = mulmod(Bgt, mod(mu));
+                rowA.push(this.rlweEncAcc(tA));
+                rowB.push(this.rlweEncAcc(tB));
             }
-            return { row_a, row_b };
+            return { rowA, rowB };
+        }
+
+        // LWE_{n_pbs, s_pbs}(m) written in place into the flat KSK buffer.
+        lweEncSmallInto(buf, off, m, gE) {
+            let acc = 0;
+            for (let i = 0; i < n_pbs; ++i) {
+                const ai = Math.floor(this.rng() * q);
+                buf[off + i] = ai;
+                if (this.s_pbs[i]) acc = mod(acc + ai);
+            }
+            buf[off + n_pbs] = mod(acc + mod(m) + Math.round(gE()));
         }
 
         generateEvaluationKeys() {
             const Sq_conj = applyAutomorphism(this.Sq, 2 * N - 1);
             const kskConj = this.makeKsk(Sq_conj);
             const kskMix = this.makeKsk(negmul(this.Sq, Sq_conj));
-            const kskPbs = [];
-            for (let i = 0; i < N; ++i) {
-                if (this.Sq[i] !== 0) {
-                    const sSign = this.Sq[i] > 0 ? 1 : -1;
-                    kskPbs.push({ index: i, sign: sSign, ggsw: this.makeGgsw(i, 1) });
+
+            // Bootstrapping key: GGSW(s_pbs[i]) at position i. The bit itself is
+            // encrypted, so the server must CMux at every index.
+            const bsk = [];
+            for (let i = 0; i < n_pbs; ++i) bsk.push(this.makeGgswAcc(this.s_pbs[i]));
+
+            // LWE key-switching key: LWE(Bg_ks^t · S_ext[j]) for the extracted key.
+            const S_ext = extractKey(this.Sq, N);
+            const gE = makeGauss(this.rng, sigma_ks);
+            const ksk = new Float64Array(N * ell_ks * KSK_STRIDE);
+            const Bgt = new Float64Array(ell_ks);
+            for (let t = 0; t < ell_ks; ++t) Bgt[t] = powmod(Bg_ks, t);
+            for (let j = 0; j < N; ++j) {
+                const sj = mod(S_ext[j]);
+                for (let t = 0; t < ell_ks; ++t) {
+                    this.lweEncSmallInto(ksk, kskOffset(j, t), mulmod(Bgt[t], sj), gE);
                 }
             }
-            return { kskConj, kskMix, kskPbs };
+            return { kskConj, kskMix, boot: { bsk, ksk } };
         }
 
         encryptVector(vec) {
@@ -369,10 +507,13 @@ const FHE = (() => {
             return Math.round(phase / (A_amp * A_amp));
         }
 
-        decrypt1bit(lweVerdict) {
-            const aS = negmul(lweVerdict.a, this.Sq);
-            const phase = centered(mod(lweVerdict.b - aS[0]));
-            return phase <= 0;
+        // The verdict is an RLWE ciphertext in R_{N_acc} under S_acc; its constant
+        // coefficient carries +Delta_out (match) or -Delta_out (no match).
+        decryptVerdict(acc) {
+            const Smod = new Float64Array(N_acc);
+            for (let i = 0; i < N_acc; ++i) Smod[i] = mod(this.S_acc[i]);
+            const aS = negmul(acc.a, Smod);
+            return centered(mod(acc.b[0] - aS[0])) > 0;
         }
 
         decryptSqDistSlot0(rlweCt) {
@@ -395,38 +536,14 @@ const FHE = (() => {
             return rlweSqDist(ctDiff, this.evalKeys.kskConj, this.evalKeys.kskMix);
         }
 
-        homomorphicThresholdPBS(lweSqdist) {
-            let bPrime = Math.round(centered(lweSqdist.b) * (2.0 * N) / q);
-            bPrime = (bPrime % (2 * N) + 2 * N) % (2 * N);
-
-            const aPrime = new Int32Array(N);
-            for (let i = 0; i < N; ++i) {
-                let ap = Math.round(centered(lweSqdist.a[i]) * (2.0 * N) / q);
-                aPrime[i] = (ap % (2 * N) + 2 * N) % (2 * N);
-            }
-
-            const V = new Float64Array(N);
-            const thresholdJ = Math.round(MATCH_THRESHOLD * A_amp * A_amp * (2.0 * N) / q);
-            for (let j = 0; j < N; ++j) {
-                V[j] = (j <= thresholdJ) ? A_amp : mod(-A_amp);
-            }
-
-            let acc = { a: new Float64Array(N), b: mshift(V, -bPrime) };
-
-            for (const bskEntry of this.evalKeys.kskPbs) {
-                const i = bskEntry.index;
-                let shiftI = (bskEntry.sign > 0) ? aPrime[i] : -aPrime[i];
-                shiftI = (shiftI % (2 * N) + 2 * N) % (2 * N);
-                if (shiftI !== 0) {
-                    const accShifted = {
-                        a: mshift(acc.a, shiftI),
-                        b: mshift(acc.b, shiftI)
-                    };
-                    acc = cmux(bskEntry.ggsw, acc, accShifted);
-                }
-            }
-
-            return lweSampleExtract(acc, 0);
+        // TFHE programmable bootstrap evaluating the step LUT:
+        //   sqDist <= threshold -> +Delta_out (match), else -Delta_out.
+        // `bskOverride` exists only for test negative controls (e.g. a permuted
+        // bootstrapping key); production callers omit it.
+        homomorphicThresholdPBS(lweSqdist, bskOverride = null) {
+            const small = lweKeyswitch(lweSqdist, this.evalKeys.boot.ksk);
+            const V = makeStepTestPoly(MATCH_THRESHOLD);
+            return blindRotate(small, V, bskOverride || this.evalKeys.boot.bsk);
         }
 
         evaluateBiometricMatch(ctLive, ctTemplate) {
@@ -437,11 +554,26 @@ const FHE = (() => {
         }
     }
 
+    // ---- Session cache -------------------------------------------------
+    // Key generation (BSK + LWE-KSK) dominates a cold run, and the keys depend
+    // only on the seed — so a session is built once and reused. Without this the
+    // demo re-keyed on every scan and the CI suite spent most of its time in
+    // keygen.
+    const sessionCache = new Map();
+    function getSession(seed = 888) {
+        let sess = sessionCache.get(seed);
+        if (!sess) {
+            const client = new ClientEngine(seed);
+            const evalKeys = client.generateEvaluationKeys();
+            sess = { client, evalKeys, server: new ServerEvaluator(evalKeys) };
+            sessionCache.set(seed, sess);
+        }
+        return sess;
+    }
+
     // ---- 512-dim Single Biometric Engine ----
     function runBiometricAuthCustom(liveVector, templateVector, seed = 888, opts = {}) {
-        const client = new ClientEngine(seed);
-        const evalKeys = client.generateEvaluationKeys();
-        const server = new ServerEvaluator(evalKeys);
+        const { client, server } = getSession(seed);
 
         const dQ = new Float64Array(n);
         let sqDistPlain = 0;
@@ -465,7 +597,7 @@ const FHE = (() => {
         // Verdict comes from 1-bit TFHE PBS verdict ciphertext lweVerdict.
         // sqDistDec comes from lweSqdist for ground-truth verification.
         const sqDistDec = client.decryptSqDist(lweSqdist);
-        const isMatch = client.decrypt1bit(lweVerdict);
+        const isMatch = client.decryptVerdict(lweVerdict);
         const homomorphicExact = Math.abs(sqDistDec - sqDistPlain) <= DEC_TOLERANCE;
         const simScore = Math.max(0, Math.min(100, 100.0 - (sqDistDec / 550.0)));
 
@@ -491,9 +623,7 @@ const FHE = (() => {
         const users = db.slice(0, k);
         const truncated = db.length > k;
 
-        const client = new ClientEngine(seed);
-        const evalKeys = client.generateEvaluationKeys();
-        const server = new ServerEvaluator(evalKeys);
+        const { client, server } = getSession(seed);
 
         const ctLive = client.encryptVector(liveVector);
 
@@ -503,11 +633,14 @@ const FHE = (() => {
 
         for (let u = 0; u < users.length; ++u) {
             const ctTemplate = client.encryptVector(users[u].vector);
-            const lweMatch = server.evaluateBiometricMatch(ctLive, ctTemplate);
+            const ctSqU = server.homomorphicSqDist(server.homomorphicDifference(ctLive, ctTemplate));
+            const lweSqU = lweSampleExtract(ctSqU, 0);
 
             // Ranking uses the homomorphically computed distance; the plaintext
             // distance is kept ONLY as ground truth for the correctness check.
-            const sqDec = client.decryptSqDist(lweMatch);
+            // (1:N ranking needs the distance itself, so no PBS is run per user;
+            //  the encrypted 1-bit verdict path is exercised by the 1:1 engine.)
+            const sqDec = client.decryptSqDist(lweSqU);
             let sqPlain = 0;
             for (let i = 0; i < n; ++i) {
                 let d = Math.round(liveVector[i] - users[u].vector[i]);
@@ -572,9 +705,11 @@ const FHE = (() => {
         runBiometricAuth,
         runBiometricAuthCustom,
         runMultiUserBiometricAuth,
-        initKeys: () => {},
-        clearKeyCache: () => {},
+        getSession,
+        initKeys: (seed = 888) => { getSession(seed); },
+        clearKeyCache: () => sessionCache.clear(),
         ClientEngine,
+        lweSampleExtract,
         ServerEvaluator,
         params: { N, n, k, ell }
     };
